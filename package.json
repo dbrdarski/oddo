@@ -1,0 +1,25 @@
+{
+  "name": "@oddo/monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Oddo monorepo containing UI and Language packages",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:ui": "npm run build --workspace=@oddo/ui",
+    "build:lang": "npm run build --workspace=@oddo/lang",
+    "playground": "node examples/server.mjs",
+    "dev": "npm run build:ui && npm run playground"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
+

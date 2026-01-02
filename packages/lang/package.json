@@ -1,0 +1,28 @@
+{
+  "name": "@oddo/lang",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Oddo Language Package",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "keywords": [
+    "language",
+    "parser",
+    "oddo"
+  ],
+  "license": "MIT"
+}
+
