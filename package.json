@@ -12,14 +12,19 @@
     "build:ui": "npm run build --workspace=@oddo/ui",
     "build:lang": "npm run build --workspace=@oddo/lang",
     "playground": "node examples/server.mjs",
-    "dev": "npm run build:ui && npm run playground"
+    "dev": "npm run build:ui && npm run playground",
+    "demo:lang": "node packages/lang/src/web-demo.mjs"
+  },
+  "dependencies": {
+    "chevrotain": "^11.0.3"
   },
   "devDependencies": {
     "tsup": "^8.0.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "@babel/generator": "^7.28.5",
+    "@babel/types": "^7.28.5"
   },
   "engines": {
     "node": ">=18.0.0"
   }
 }
-

@@ -1,10 +1,10 @@
-import { state, computed, effect, e, c, x, f, mount, mutate, transact, stateProxy } from '../packages/ui/dist/index.mjs';
+import { state, computed, effect, e, c, x, f, mount, mutate, transact, stateProxy } from '../packages/ui/dist/index.mjs'
 
 // ========================================
 // Example 1: Counter (Reactive State)
 // ========================================
 const Counter = () => {
-  const [count, setCount] = state(0);
+  const [count, setCount] = state(0)
   const addToCount = mutate((count, x) => {
     setCount((count = stateProxy(count() + x))())
   }, [count], [])
@@ -24,14 +24,14 @@ const Counter = () => {
       e('button', { onclick: decrement }, '- Decrement'),
       e('button', { class: 'secondary', onclick: () => setCount(0) }, 'Reset')
     )
-  );
-};
+  )
+}
 
 // ========================================
 // Example 2: Input Binding (Reactive State)
 // ========================================
 const InputBinding = () => {
-  const [text, setText] = state('');
+  const [text, setText] = state('')
 
   return e('div', { class: 'section' },
     e('h2', {}, 'Example 2: Input Binding'),
@@ -52,21 +52,21 @@ const InputBinding = () => {
       e('strong', {}, 'Character count: '),
       x(x => x(), [computed((text) => text().length, [text])  ])
     )
-  );
-};
+  )
+}
 
 // ========================================
 // Example 3: Computed Values
 // ========================================
 const ComputedDemo = () => {
-  const [firstName, setFirstName] = state('John');
-  const [lastName, setLastName] = state('Doe');
+  const [firstName, setFirstName] = state('John')
+  const [lastName, setLastName] = state('Doe')
 
   const fullName = computed((firstName, lastName) => {
-    const first = firstName();
-    const last = lastName();
-    return first && last ? `${first} ${last}` : first || last || '(no name)';
-  }, [firstName, lastName]);
+    const first = firstName()
+    const last = lastName()
+    return first && last ? `${first} ${last}` : first || last || '(no name)'
+  }, [firstName, lastName])
 
   return e('div', { class: 'section' },
     e('h2', {}, 'Example 3: Computed Values'),
@@ -91,8 +91,8 @@ const ComputedDemo = () => {
       e('strong', {}, 'Full Name (computed): '),
       x(fullName => fullName(), [fullName])
     )
-  );
-};
+  )
+}
 
 // ========================================
 // Example 4: Todo List (Dynamic Lists)
@@ -102,22 +102,22 @@ const TodoList = () => {
     { id: 1, text: 'Learn @oddo/ui' },
     { id: 2, text: 'Build something awesome' },
     { id: 3, text: 'Share with the world' }
-  ]);
-  const [newTodo, setNewTodo] = state('');
+  ])
+  const [newTodo, setNewTodo] = state('')
 
-  let nextId = 4;
+  let nextId = 4
 
   const addTodo = () => {
-    const text = newTodo.get().trim();
+    const text = newTodo.get().trim()
     if (text) {
-      setTodos([...todos.get(), { id: nextId++, text }]);
-      setNewTodo('');
+      setTodos([...todos.get(), { id: nextId++, text }])
+      setNewTodo('')
     }
-  };
+  }
 
   const removeTodo = (id) => {
-    setTodos(todos.get().filter(todo => todo.id !== id));
-  };
+    setTodos(todos.get().filter(todo => todo.id !== id))
+  }
 
   return e('div', { class: 'section' },
     e('h2', {}, 'Example 4: Todo List (Dynamic Lists)'),
@@ -149,8 +149,8 @@ const TodoList = () => {
         ))
       ), [todos])
     ]))
-  );
-};
+  )
+}
 
 // ========================================
 // Example 5: Component Composition
@@ -161,8 +161,8 @@ const Button = ({ props, children }) => {
   return e('button', {
     class: props.variant || 'primary',
     onclick: props.onclick
-  }, ...children);
-};
+  }, ...children)
+}
 
 // Reusable Card Component
 const Card = ({ props, children }) => {
@@ -170,11 +170,11 @@ const Card = ({ props, children }) => {
     props.title ? e('h2', {}, props.title) : null,
     props.description ? e('p', { class: 'section-description' }, props.description) : null,
     ...children
-  );
-};
+  )
+}
 
 const ComponentComposition = () => {
-  const [clickCount, setClickCount] = state(0);
+  const [clickCount, setClickCount] = state(0)
 
   return c(Card, {
     title: 'Example 5: Component Composition',
@@ -189,8 +189,8 @@ const ComponentComposition = () => {
       c(Button, { variant: 'secondary', onclick: () => setClickCount(clickCount.get() + 5) }, '+5'),
       c(Button, { variant: 'danger', onclick: () => setClickCount(0) }, 'Reset')
     )
-  );
-};
+  )
+}
 
 // ========================================
 // Main App - Compose all examples
@@ -201,10 +201,10 @@ const App = e('div', {},
   c(ComputedDemo),
   c(TodoList),
   c(ComponentComposition)
-);
+)
 
 // Mount the app
-const app = document.getElementById('app');
+const app = document.getElementById('app')
 
 Object.assign(window, {
   state, computed, effect, e, c, x, mount, f
@@ -213,5 +213,5 @@ Object.assign(window, {
 if (app) {
   mount(app, App)
 } else {
-  console.error('Could not find #app element');
+  console.error('Could not find #app element')
 }
