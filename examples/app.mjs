@@ -1,10 +1,19 @@
-import { state, computed, effect, e, c, x, f, mount } from '../packages/ui/dist/index.mjs';
+import { state, computed, effect, e, c, x, f, mount, mutate, stateProxy } from '../packages/ui/dist/index.mjs';
 
 // ========================================
 // Example 1: Counter (Reactive State)
 // ========================================
 const Counter = () => {
   const [count, setCount] = state(0);
+  const addToCount = mutate(($, count, x) => {
+    count = stateProxy(count() + x)
+    $(count)
+  }, x => {
+    setCount(x())
+  }, [count], [])
+
+  const increment = addToCount.bind(null, 1)
+  const decrement = addToCount.bind(null, -1)
 
   return e('div', { class: 'section' },
     e('h2', {}, 'Example 1: Counter (Reactive State)'),
@@ -14,8 +23,8 @@ const Counter = () => {
       x((count) => count(), [count]),
     ),
     e('div', { class: 'controls' },
-      e('button', { onclick: () => setCount(count.get() + 1) }, '+ Increment'),
-      e('button', { onclick: () => setCount(count.get() - 1) }, '- Decrement'),
+      e('button', { onclick: increment }, '+ Increment'),
+      e('button', { onclick: decrement }, '- Decrement'),
       e('button', { class: 'secondary', onclick: () => setCount(0) }, 'Reset')
     )
   );

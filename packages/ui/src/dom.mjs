@@ -44,7 +44,6 @@ export const createFragment = (...children) => (parent, oldNodeCleanup) => {
   oldNodeCleanup ? oldNodeCleanup(parent, node) : parent.appendChild(node)
 
   return (parent, newElement) => {
-    console.log({ parent, node, newElement })
     const range = document.createRange()
     range.setStart(startNode, 1)
     range.setEnd(endNode, 0)
@@ -60,7 +59,6 @@ export const createElement = (tag, attrs, ...children) => (parent, oldNodeCleanu
     : patchAttributes(node, attrs)
 
   for (const child of children) {
-    console.log({ render: render(child), child })
     render(child)(node)
   }
   oldNodeCleanup ? oldNodeCleanup(parent, node) : parent.appendChild(node)

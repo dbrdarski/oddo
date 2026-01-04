@@ -1,5 +1,4 @@
 export const reactiveSymbol = Symbol.for("oddo::is-reactive-handler-property-symbol")
-const log = (x) => (console.log(x), x)
 
 class ReactiveContainer {
   [reactiveSymbol] = true
@@ -36,9 +35,8 @@ export const computed = (fn, deps) => {
   deps = bindDependencies(deps, () => (cached = false, notify()))
 
   return new ReactiveContainer(function computed (caller) {
-    caller && subscribe(caller)
     if (!cached) {
-      console.log({ fn })
+      caller && subscribe(caller)
       cache = fn(...deps)
       cached = true
     }
@@ -67,4 +65,77 @@ export const schedule = (effect) => {
 export const executeQueue = () => {
   for (const effect of queue) { effect() }
   queue.length = 0
+}
+
+const copyOnWrite = (target) => {
+	let dirty = false
+	return (update = true) => {
+		if (dirty) {
+			return target
+		}
+		dirty = update
+		return target = Object.assign(target.constructor(), target)
+	}
+};
+
+const noop = () => {}
+export const stateProxy = (target, mutable, notifyParent) => {
+  if (target && typeof target === "object") {
+    const mutate = copyOnWrite(target)
+    const children = new Map()
+    return new Proxy(noop, {
+      apply () {
+        return target = mutate(mutable)
+      },
+      set (_, key, value) {
+        if (record.hasOwnProperty(prop) && target[key] === value) return false
+        if (children.has(key) && !(value && typeof value === "object")) {
+          children.delete(key)
+        }
+        target = mutate()
+        target[key] = value
+        mutable || notifyParent?.(target)
+        return true
+      },
+      get (_, key) {
+        const value = Reflect.get(target, key, target)
+        if (!children.has(key)) {
+          children.set(stateProxy(value, mutable, (value) => {
+            target = mutate()
+            target[key] = value
+          }))
+        }
+        return children.get(key)
+      }
+    })
+  }
+  return () => target
+}
+
+// @mutate updateXY = (newX, newY, mutable) => {
+//   x := newX
+//   tempX = x
+//   x.z := 3
+//   mutable = x.z
+//   y = y + 1
+// }
+
+// const updateXY = mutate(($, x, y) => (newX) => { // mutate can be added to the deps or ignored
+//     x = stateProxy(newX())
+//     const tempX = x()
+//     x.z = 3
+//     mutable = x.z()
+//     y = stateProxy(y() + 1)
+//     $(x(), y())
+// }, (x, y) => {
+//   setX(x)
+//   setY(y)
+// }, [x, y], [])
+
+export const mutate = (mutator, finalizer, targets, otherValues) => {
+  otherValues = bindDependencies(otherValues)
+  return (...args) => {
+    const stateProxies = targets.map(state => stateProxy(state.get()))
+    mutator(finalizer, ...stateProxies, ...otherValues, ...args)
+  }
 }
