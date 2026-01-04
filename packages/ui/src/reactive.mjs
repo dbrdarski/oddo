@@ -131,11 +131,19 @@ export const stateProxy = (target, mutable, notifyParent) => {
 //   setX(x)
 //   setY(y)
 // }, [x, y], [])
-
-export const mutate = (mutator, finalizer, targets, otherValues) => {
+const empty = Objecy.freeze([])
+export const mutate = (mutator, targets, otherValues = empty) => {
   otherValues = bindDependencies(otherValues)
   return (...args) => {
     const stateProxies = targets.map(state => stateProxy(state.get()))
+    mutator(...stateProxies, ...otherValues, ...args)
+  }
+}
+
+export const transact = (mutator, finalizer, targets, otherValues = empty) => {
+  otherValues = bindDependencies(otherValues)
+  return (...args) => {
+    const stateProxies = targets.map(state => stateProxy(state.get())) // we also need to include mutable (LET) variables here
     mutator(finalizer, ...stateProxies, ...otherValues, ...args)
   }
 }
