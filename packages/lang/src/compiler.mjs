@@ -70,7 +70,7 @@ function extractIdentifiers(babelNode) {
 const MODIFIER_TRANSFORMATIONS = {
   state: {
     // @state x = 3 -> con~st x = $Oddo.state(3);
-    needsNextImport: true,
+    needsOddoImport: true,
     transform: (valueExpr, leftExpr) => {
       const stateCall = t.callExpression(
         t.memberExpression(
@@ -92,7 +92,7 @@ const MODIFIER_TRANSFORMATIONS = {
   },
   computed: {
     // @computed sum = x + y -> const sum = $Oddo.computed((x, y) => x + y, [x, y])
-    needsNextImport: true,
+    needsOddoImport: true,
     transform: (valueExpr, leftExpr) => {
       const identifiers = extractIdentifiers(valueExpr);
       const params = identifiers.map(id => t.identifier(id));
@@ -122,7 +122,7 @@ const MODIFIER_TRANSFORMATIONS = {
   },
   react: {
     // @react sum = x + y -> const sum = $Oddo.react((x, y) => x + y, [x, y])
-    needsNextImport: true,
+    needsOddoImport: true,
     transform: (valueExpr, leftExpr) => {
       const identifiers = extractIdentifiers(valueExpr);
       const params = identifiers.map(id => t.identifier(id));
@@ -152,7 +152,7 @@ const MODIFIER_TRANSFORMATIONS = {
   },
   mutate: {
     // @mutate addPerson = (x) => ... -> const addPerson = $Oddo.mutate((x) => { ... })
-    needsNextImport: true,
+    needsOddoImport: true,
     transform: (valueExpr, leftExpr) => {
       // mutate must be an arrow function
       if (valueExpr.type !== 'ArrowFunctionExpression') {
@@ -179,7 +179,7 @@ const MODIFIER_TRANSFORMATIONS = {
 };
 
 // Track if $Oddo import is needed
-let needsNextImport = false;
+let needsOddoImport = false;
 
 /**
  * Convert Oddo AST to Babel AST and generate JavaScript code
@@ -192,12 +192,12 @@ export function compileToJS(ast) {
   }
 
   // Reset the $Oddo import flag
-  needsNextImport = false;
+  needsOddoImport = false;
 
   const babelAST = convertProgram(ast);
 
   // Add $Oddo import if needed
-  if (needsNextImport) {
+  if (needsOddoImport) {
     const importDeclaration = t.importDeclaration(
       [t.importDefaultSpecifier(t.identifier('$Oddo'))],
       t.stringLiteral('next-lang/ui')
@@ -284,10 +284,10 @@ function convertExpressionStatement(stmt) {
       }
 
       // Apply the modifier transformation
-      const { needsNextImport: modifierNeedsImport, transform } = modifierTransform;
+      const { needsOddoImport: modifierNeedsImport, transform } = modifierTransform;
       console.log({ modifierNeedsImport, transform });
       if (modifierNeedsImport) {
-        needsNextImport = true;
+        needsOddoImport = true;
       }
 
       const transformedStmt = transform(valueExpr, leftExpr);
@@ -324,9 +324,9 @@ function convertExpressionStatement(stmt) {
           }
 
           // Apply the modifier transformation
-          const { needsNextImport: modifierNeedsImport, transform } = modifierTransform;
+          const { needsOddoImport: modifierNeedsImport, transform } = modifierTransform;
           if (modifierNeedsImport) {
-            needsNextImport = true;
+            needsOddoImport = true;
           }
 
           const transformedStmt = transform(valueExpr, leftExpr);
