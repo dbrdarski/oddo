@@ -13,21 +13,19 @@ const traverse = _traverse.default || _traverse;
 // Helper function to extract identifiers from a Babel AST expression
 function extractIdentifiers(babelNode) {
   const identifiers = new Set();
+  const locals = new Set(); // Track locally bound identifiers
 
   function traverse(node) {
     if (!node) return;
 
-    // Babel AST types
     if (t.isIdentifier(node)) {
-      identifiers.add(node.name);
-    } else if (t.isMemberExpression(node)) {
+      if (!locals.has(node.name)) identifiers.add(node.name);
+    } else if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
       traverse(node.object);
-      // Don't add property names, only object identifiers
-    } else if (t.isCallExpression(node)) {
+      if (node.computed) traverse(node.property);
+    } else if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
       traverse(node.callee);
-      if (node.arguments) {
-        node.arguments.forEach(arg => traverse(arg));
-      }
+      node.arguments?.forEach(arg => traverse(arg));
     } else if (t.isBinaryExpression(node) || t.isLogicalExpression(node)) {
       traverse(node.left);
       traverse(node.right);
@@ -38,21 +36,31 @@ function extractIdentifiers(babelNode) {
       traverse(node.consequent);
       traverse(node.alternate);
     } else if (t.isArrayExpression(node)) {
-      if (node.elements) {
-        node.elements.forEach(el => traverse(el));
-      }
+      node.elements?.forEach(el => traverse(el));
     } else if (t.isObjectExpression(node)) {
-      if (node.properties) {
-        node.properties.forEach(prop => {
-          if (t.isObjectProperty(prop)) {
-            traverse(prop.key);
-            traverse(prop.value);
-          }
-        });
-      }
+      node.properties?.forEach(prop => {
+        if (t.isObjectProperty(prop)) {
+          if (prop.computed) traverse(prop.key);
+          traverse(prop.value);
+        } else if (t.isSpreadElement(prop)) {
+          traverse(prop.argument);
+        }
+      });
     } else if (t.isArrowFunctionExpression(node)) {
-      // Don't traverse into arrow function parameters or body
-      // Arrow functions create their own scope
+      // Collect params as locals, then traverse body
+      node.params.forEach(p => {
+        if (t.isIdentifier(p)) locals.add(p.name);
+        else if (t.isObjectPattern(p)) p.properties.forEach(prop => t.isIdentifier(prop.value) && locals.add(prop.value.name));
+        else if (t.isArrayPattern(p)) p.elements?.forEach(el => t.isIdentifier(el) && locals.add(el.name));
+      });
+      if (t.isBlockStatement(node.body)) node.body.body.forEach(s => traverse(s));
+      else traverse(node.body);
+    } else if (t.isBlockStatement(node)) {
+      node.body.forEach(s => traverse(s));
+    } else if (t.isExpressionStatement(node)) {
+      traverse(node.expression);
+    } else if (t.isReturnStatement(node)) {
+      traverse(node.argument);
     } else if (t.isSequenceExpression(node)) {
       node.expressions.forEach(expr => traverse(expr));
     } else if (t.isUpdateExpression(node)) {
@@ -60,11 +68,45 @@ function extractIdentifiers(babelNode) {
     } else if (t.isAssignmentExpression(node)) {
       traverse(node.left);
       traverse(node.right);
+    } else if (t.isSpreadElement(node)) {
+      traverse(node.argument);
     }
   }
 
   traverse(babelNode);
   return Array.from(identifiers);
+}
+
+// Wrap dependency references with call expressions: x -> x()
+function wrapDependenciesWithCalls(arrowFunc, deps) {
+  const depSet = new Set(deps);
+  const locals = new Set();
+  
+  // Collect local bindings from nested arrow functions only
+  const tempFile = t.file(t.program([t.expressionStatement(arrowFunc)]));
+  traverse(tempFile, {
+    noScope: true,
+    ArrowFunctionExpression(path) {
+      if (path.node !== arrowFunc) {
+        path.node.params.forEach(p => t.isIdentifier(p) && locals.add(p.name));
+      }
+    }
+  });
+
+  // Traverse only the body, not the params
+  const bodyFile = t.file(t.program([t.isBlockStatement(arrowFunc.body) ? arrowFunc.body : t.expressionStatement(arrowFunc.body)]));
+  const toReplace = [];
+  traverse(bodyFile, {
+    noScope: true,
+    Identifier(path) {
+      const parent = path.parent;
+      const isProperty = t.isMemberExpression(parent) && parent.property === path.node && !parent.computed;
+      if (depSet.has(path.node.name) && !isProperty && !locals.has(path.node.name)) {
+        toReplace.push(path);
+      }
+    }
+  });
+  toReplace.forEach(p => p.replaceWith(t.callExpression(t.identifier(p.node.name), [])));
 }
 
 // Modifier transformations map
@@ -88,16 +130,16 @@ const MODIFIER_TRANSFORMATIONS = {
     },
   },
   computed: {
-    // @computed sum = x + y -> const sum = _computed((x, y) => x + y, [x, y])
+    // @computed sum = x + y -> const sum = _computed((x, y) => x() + y(), [x, y])
     transform: (valueExpr, leftExpr) => {
       const identifiers = extractIdentifiers(valueExpr);
       const params = identifiers.map(id => t.identifier(id));
       const deps = identifiers.map(id => t.identifier(id));
 
-      const arrowFunc = t.arrowFunctionExpression(
-        params,
-        valueExpr
-      );
+      const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
+
+      // Wrap dependency references with call expressions
+      wrapDependenciesWithCalls(arrowFunc, identifiers);
 
       const computedCall = t.callExpression(
         t.identifier(modifierAliases['computed']),
@@ -113,16 +155,16 @@ const MODIFIER_TRANSFORMATIONS = {
     },
   },
   react: {
-    // @react sum = x + y -> const sum = _react((x, y) => x + y, [x, y])
+    // @react sum = x + y -> const sum = _react((x, y) => x() + y(), [x, y])
     transform: (valueExpr, leftExpr) => {
       const identifiers = extractIdentifiers(valueExpr);
       const params = identifiers.map(id => t.identifier(id));
       const deps = identifiers.map(id => t.identifier(id));
 
-      const arrowFunc = t.arrowFunctionExpression(
-        params,
-        valueExpr
-      );
+      const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
+
+      // Wrap dependency references with call expressions
+      wrapDependenciesWithCalls(arrowFunc, identifiers);
 
       const reactCall = t.callExpression(
         t.identifier(modifierAliases['react']),
@@ -185,41 +227,52 @@ export function compileToJS(ast, config = {}) {
   modifierAliases = {};
 
   // First pass: Convert AST with temporary placeholder identifiers
-  // Use unique placeholders that won't collide with user code
   const allModifiers = ['state', 'computed', 'react', 'mutate'];
   for (const modifier of allModifiers) {
     modifierAliases[modifier] = `__ODDO_MODIFIER_${modifier}__`;
   }
 
   const babelAST = convertProgram(ast);
-
-  // Second pass: Generate truly unique identifiers using Babel's scope
-  // This ensures no collisions with user-defined variables
-  const tempToUnique = {}; // Maps temporary names to unique names
-  
-  // Wrap in a File node for proper traversal
   const fileAST = t.file(babelAST);
   
+  // Collect all identifiers in the code to avoid collisions
+  const usedNames = new Set();
   traverse(fileAST, {
-    Program(path) {
-      // Generate unique identifiers for each modifier that was actually used
-      for (const modifier of usedModifiers) {
-        const tempName = `__ODDO_MODIFIER_${modifier}__`;
-        const uniqueName = path.scope.generateUid(modifier);
-        tempToUnique[tempName] = uniqueName;
-        modifierAliases[modifier] = uniqueName;
+    noScope: true,
+    Identifier(path) {
+      if (!path.node.name.startsWith('__ODDO_MODIFIER_')) {
+        usedNames.add(path.node.name);
       }
-      path.stop();
     }
   });
   
-  // Third pass: Replace all temporary identifiers with unique ones
+  // UID generator that avoids collisions
+  const generateUid = (name) => {
+    let candidate = `_${name}`;
+    let i = 1;
+    while (usedNames.has(candidate)) {
+      candidate = `_${name}${i++}`;
+    }
+    usedNames.add(candidate);
+    return candidate;
+  };
+
+  // Generate unique identifiers for each modifier that was actually used
+  const tempToUnique = {};
+  for (const modifier of usedModifiers) {
+    const tempName = `__ODDO_MODIFIER_${modifier}__`;
+    const uniqueName = generateUid(modifier);
+    tempToUnique[tempName] = uniqueName;
+    modifierAliases[modifier] = uniqueName;
+  }
+  
+  // Replace all temporary identifiers with unique ones
   if (Object.keys(tempToUnique).length > 0) {
     traverse(fileAST, {
+      noScope: true,
       Identifier(path) {
-        const tempName = path.node.name;
-        if (tempToUnique[tempName]) {
-          path.node.name = tempToUnique[tempName];
+        if (tempToUnique[path.node.name]) {
+          path.node.name = tempToUnique[path.node.name];
         }
       }
     });

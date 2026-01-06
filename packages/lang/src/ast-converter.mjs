@@ -1056,56 +1056,63 @@ function convertFunctionCall(cst) {
     };
   }
 
-  for (let i = 0; i < leftParens.length; i++) {
-    const leftParen = leftParens[i];
+  // Collect all operations: calls, dots, brackets, optional access
+  const dots = cst.children.Dot || [];
+  const identifiers = cst.children.Identifier || [];
+  const brackets = cst.children.LeftBracket || [];
+  const rightBrackets = cst.children.RightBracket || [];
+  const argLists = getAllChildren(cst, 'argumentList');
+  const allExprs = getAllChildren(cst, 'expression');
 
-    // Check if this call is optional (preceded by QuestionDot)
-    const isOptional = questionDots.some(qDot => {
-      // QuestionDot should be immediately before this left paren
-      return qDot.endOffset < leftParen.startOffset && leftParen.startOffset - qDot.endOffset <= 1;
-    });
-      const argsCST = getAllChildren(cst, 'argumentList')[i];
-      const arguments_ = [];
+  // Build unified operations list sorted by offset
+  const ops = [
+    ...leftParens.map((t, i) => ({ k: 'c', off: t.startOffset, i, token: t })),
+    ...dots.map((t, i) => ({ k: 'd', off: t.startOffset, i })),
+    ...brackets.map((t, i) => ({ k: 'b', off: t.startOffset, i, end: rightBrackets[i]?.endOffset })),
+    ...questionDots.filter(q => !leftParens.some(p => Math.abs(p.startOffset - q.endOffset) <= 1))
+      .map((t, i) => ({ k: 'q', off: t.startOffset, i }))
+  ].sort((a, b) => a.off - b.off);
 
+  let identIdx = 0;
+
+  for (const op of ops) {
+    if (op.k === 'c') {
+      // Function call
+      const isOptional = questionDots.some(q => q.endOffset < op.token.startOffset && op.token.startOffset - q.endOffset <= 1);
+      const argsCST = argLists[op.i];
+      const args = [];
       if (argsCST) {
-        // Get expressions and tokens directly from CST children
-        const expressions = getAllChildren(argsCST, 'expression');
-        const dotDotDots = argsCST.children.DotDotDot || [];
-
-        // Check each expression - if there's a DotDotDot token right before it (offset-wise), it's a spread
-        for (let i = 0; i < expressions.length; i++) {
-          const exprCst = expressions[i];
-          const exprStart = getFirstTokenOffset(exprCst);
-
-          // Check if there's a DotDotDot token that ends right before this expression starts
-          const isSpread = exprStart !== undefined && dotDotDots.some(dot => {
-            const dotEnd = dot.endOffset;
-            // DotDotDot ends at dotEnd, expression starts at exprStart
-            // They should be adjacent (with at most 1 whitespace char between)
-            return Math.abs(dotEnd + 1 - exprStart) <= 1;
-          });
-
-          if (isSpread) {
-            arguments_.push({
-              type: 'spreadElement',
-              argument: convertExpression(exprCst),
-            });
-          } else {
-            arguments_.push(convertExpression(exprCst));
-          }
+        const exprs = getAllChildren(argsCST, 'expression');
+        const spreads = argsCST.children.DotDotDot || [];
+        for (const expr of exprs) {
+          const start = getFirstTokenOffset(expr);
+          const isSpread = start !== undefined && spreads.some(s => Math.abs(s.endOffset + 1 - start) <= 1);
+          args.push(isSpread ? { type: 'spreadElement', argument: convertExpression(expr) } : convertExpression(expr));
         }
       }
-
-      callee = {
-        type: 'call',
-        callee,
-        arguments: arguments_,
-        optional: isOptional,
-      };
+      callee = { type: 'call', callee, arguments: args, optional: isOptional };
+    } else if (op.k === 'd') {
+      const id = identifiers[identIdx++];
+      if (id) callee = { type: 'memberAccess', object: callee, property: id.image, computed: false, optional: false };
+    } else if (op.k === 'q') {
+      const nextBracket = brackets.find(b => b.startOffset > op.off && b.startOffset - op.off <= 2);
+      if (nextBracket) {
+        const bIdx = brackets.indexOf(nextBracket);
+        const expr = allExprs.find(e => { const o = getFirstTokenOffset(e); return o > nextBracket.startOffset && o < rightBrackets[bIdx]?.endOffset; });
+        if (expr) callee = { type: 'memberAccess', object: callee, property: convertExpression(expr), computed: true, optional: true };
+        ops.splice(ops.findIndex(o => o.k === 'b' && o.i === bIdx), 1);
+      } else {
+        const id = identifiers[identIdx++];
+        if (id) callee = { type: 'memberAccess', object: callee, property: id.image, computed: false, optional: true };
+      }
+    } else if (op.k === 'b') {
+      const expr = allExprs.find(e => { const o = getFirstTokenOffset(e); return o > op.off && o < op.end; });
+      if (expr) callee = { type: 'memberAccess', object: callee, property: convertExpression(expr), computed: true, optional: false };
+    }
   }
 
   return callee;
-  }
+}
 
 function convertMemberAccess(cst) {
   let object = convertExpression(getFirstChild(cst, 'primary'));
