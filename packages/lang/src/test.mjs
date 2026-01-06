@@ -194,7 +194,7 @@ test('Return without argument', () => {
 
 // Blocks
 test('Arrow function with block body', () => {
-  const ast = parseOddo('fn = arg =>\n  x = 10\n  y = 20');
+  const ast = parseOddo('fn = arg => {\n  x = 10\n  y = 20\n}');
   assertASTType(ast, 'program');
   const stmt = ast.body[0];
   assertASTType(stmt.expression, 'assignment');
@@ -204,7 +204,7 @@ test('Arrow function with block body', () => {
 });
 
 test('Nested modifier blocks', () => {
-  const ast = parseOddo('@outer:\n  @inner:\n    x = 10');
+  const ast = parseOddo('@outer: { @inner: { x = 10 } }');
   assertASTType(ast, 'program');
   const outer = ast.body[0];
   assert(outer.modifier === 'outer', 'Outer should have modifier');
@@ -215,7 +215,7 @@ test('Nested modifier blocks', () => {
 });
 
 test('Arrow function block with return', () => {
-  const ast = parseOddo('fn = arg =>\n  x = 10\n  return x');
+  const ast = parseOddo('fn = arg => {\n  x = 10\n  return x\n}');
   assertASTType(ast, 'program');
   const stmt = ast.body[0];
   assertASTType(stmt.expression, 'assignment');
@@ -234,7 +234,7 @@ test('Modifier on expression', () => {
 });
 
 test('Modifier on block', () => {
-  const ast = parseOddo('@computed:\n  y = 3 + x\n  z = y * 2');
+  const ast = parseOddo('@computed: {\n  y = 3 + x\n  z = y * 2\n}');
   assertASTType(ast, 'program');
   const stmt = ast.body[0];
   assert(stmt.modifier === 'computed', 'Modifier should be "computed"');
@@ -252,8 +252,8 @@ test('Modifier on return', () => {
 
 test('State modifier transformation', () => {
   const js = compileOddoToJS('@state x = 3');
-  assert(js.includes('import $Oddo from "@oddo/ui"'), 'Should import $Oddo');
-  assert(js.includes('$Oddo.state(3)'), 'Should transform to $Oddo.state(3)');
+  assert(/import \{ state as \w+ \} from "@oddo\/ui"/.test(js), 'Should import state with alias');
+  assert(/const x = \w+\(3\)/.test(js), 'Should call state function');
 });
 
 test('Unknown modifier throws error', () => {
@@ -267,36 +267,36 @@ test('Unknown modifier throws error', () => {
 
 test('Multiple state modifiers only import once', () => {
   const js = compileOddoToJS('@state x = 3\n@state y = 5');
-  const importCount = (js.match(/import \$Oddo/g) || []).length;
-  assert(importCount === 1, 'Should only import $Oddo once');
-  assert(js.includes('$Oddo.state(3)'), 'Should have first state call');
-  assert(js.includes('$Oddo.state(5)'), 'Should have second state call');
+  const importCount = (js.match(/import \{/g) || []).length;
+  assert(importCount === 1, 'Should only have one import statement');
+  assert(/const x = \w+\(3\)/.test(js), 'Should have first state call');
+  assert(/const y = \w+\(5\)/.test(js), 'Should have second state call');
 });
 
 test('Custom runtime library configuration', () => {
   const js = compileOddoToJS('@state x = 3', { runtimeLibrary: 'my-custom-lib' });
-  assert(js.includes('import $Oddo from "my-custom-lib"'), 'Should import from custom library');
-  assert(js.includes('$Oddo.state(3)'), 'Should transform to $Oddo.state(3)');
+  assert(/import \{ state as \w+ \} from "my-custom-lib"/.test(js), 'Should import from custom library');
+  assert(/const x = \w+\(3\)/.test(js), 'Should call state function');
 });
 
 test('Computed modifier extracts identifiers', () => {
   const js = compileOddoToJS('@computed sum = x + y');
-  assert(js.includes('$Oddo.computed'), 'Should use $Oddo.computed');
-  assert(js.includes('(x, y) =>'), 'Should have arrow function with x and y');
+  assert(/import \{ computed as \w+ \} from "@oddo\/ui"/.test(js), 'Should import computed');
+  assert(/const sum = \w+\(\(x, y\) =>/.test(js), 'Should call computed with arrow function');
   assert(js.includes('[x, y]'), 'Should have dependency array with x and y');
 });
 
 test('React modifier extracts identifiers', () => {
   const js = compileOddoToJS('@react sum = x + y');
-  assert(js.includes('$Oddo.react'), 'Should use $Oddo.react');
-  assert(js.includes('(x, y) =>'), 'Should have arrow function with x and y');
+  assert(/import \{ react as \w+ \} from "@oddo\/ui"/.test(js), 'Should import react');
+  assert(/const sum = \w+\(\(x, y\) =>/.test(js), 'Should call react with arrow function');
   assert(js.includes('[x, y]'), 'Should have dependency array with x and y');
 });
 
 test('Mutate modifier with arrow function', () => {
   const js = compileOddoToJS('@mutate addPerson = (x) => x + 1');
-  assert(js.includes('$Oddo.mutate'), 'Should use $Oddo.mutate');
-  assert(js.includes('const addPerson'), 'Should create const declaration');
+  assert(/import \{ mutate as \w+ \} from "@oddo\/ui"/.test(js), 'Should import mutate');
+  assert(/const addPerson = \w+\(/.test(js), 'Should call mutate function');
 });
 
 test('Mutate modifier without function throws error', () => {
@@ -309,29 +309,29 @@ test('Mutate modifier without function throws error', () => {
 });
 
 test('State modifier block applies to each statement', () => {
-  const js = compileOddoToJS('@state:\n  x = 3\n  y = 4');
-  assert(js.includes('const x = $Oddo.state(3)'), 'Should have first state declaration');
-  assert(js.includes('const y = $Oddo.state(4)'), 'Should have second state declaration');
+  const js = compileOddoToJS('@state: {\n  x = 3\n  y = 4\n}');
+  assert(/const x = \w+\(3\)/.test(js), 'Should have first state declaration');
+  assert(/const y = \w+\(4\)/.test(js), 'Should have second state declaration');
   // Should not be wrapped in IIFE
   assert(!js.includes('(() =>'), 'Should not wrap in IIFE');
 });
 
 test('Computed modifier block applies to each statement', () => {
-  const js = compileOddoToJS('@computed:\n  sum = x + y\n  product = x * y');
-  assert(js.includes('const sum = $Oddo.computed'), 'Should have first computed declaration');
-  assert(js.includes('const product = $Oddo.computed'), 'Should have second computed declaration');
+  const js = compileOddoToJS('@computed: {\n  sum = x + y\n  product = x * y\n}');
+  assert(/const sum = \w+\(/.test(js), 'Should have first computed declaration');
+  assert(/const product = \w+\(/.test(js), 'Should have second computed declaration');
 });
 
 test('React modifier block applies to each statement', () => {
-  const js = compileOddoToJS('@react:\n  total = a + b\n  diff = a - b');
-  assert(js.includes('const total = $Oddo.react'), 'Should have first react declaration');
-  assert(js.includes('const diff = $Oddo.react'), 'Should have second react declaration');
+  const js = compileOddoToJS('@react: {\n  total = a + b\n  diff = a - b\n}');
+  assert(/const total = \w+\(/.test(js), 'Should have first react declaration');
+  assert(/const diff = \w+\(/.test(js), 'Should have second react declaration');
 });
 
 test('Mutate modifier block applies to each statement', () => {
-  const js = compileOddoToJS('@mutate:\n  add = (x) => x + 1\n  sub = (x) => x - 1');
-  assert(js.includes('const add = $Oddo.mutate'), 'Should have first mutate declaration');
-  assert(js.includes('const sub = $Oddo.mutate'), 'Should have second mutate declaration');
+  const js = compileOddoToJS('@mutate: {\n  add = (x) => x + 1\n  sub = (x) => x - 1\n}');
+  assert(/const add = \w+\(/.test(js), 'Should have first mutate declaration');
+  assert(/const sub = \w+\(/.test(js), 'Should have second mutate declaration');
 });
 
 // Syntax validation

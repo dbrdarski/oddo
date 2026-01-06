@@ -48,11 +48,11 @@ Use Chevrotain's proper GATE mechanism with careful lookahead, or restructure th
 
 **Current Status:** Basic structure in place, but needs proper token/parsing logic for JSX text.
 
-### 3. Indentation-Based Blocks
+### 3. Block Syntax
 
-**Problem:** Oddo language uses indentation for blocks (Python-style), not curly braces.
+**Status:** ✅ Implemented using brace-based blocks (JavaScript-style).
 
-**Current Status:** Not yet implemented. Requires custom parsing logic or a separate pass.
+The language originally planned to use indentation-based blocks but was changed to use curly braces `{}` for better JavaScript compatibility and simpler implementation.
 
 ## 🔧 Next Steps
 
@@ -70,11 +70,7 @@ Use Chevrotain's proper GATE mechanism with careful lookahead, or restructure th
    - Add proper token handling for JSX text
    - Update parser rules
 
-4. **Add Indentation-Based Block Parsing**
-   - Implement indentation tracking
-   - Parse blocks based on indentation levels
-
-5. **Add Tests**
+4. **Add Tests**
    - Unit tests for each grammar rule
    - Integration tests for full programs
    - Error handling tests

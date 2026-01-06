@@ -42,8 +42,9 @@ The parser correctly:
 1. Fix AST converter function structure
 2. Complete AST conversion for all node types
 3. Test with more complex examples (arrays, objects, JSX, etc.)
-4. Add indentation-based block parsing
-5. Add comprehensive tests
+4. Add comprehensive tests
+
+**Note:** The language uses brace-based blocks `{}` (JavaScript-style), not indentation-based blocks.
 
 ## How to Use (Once AST Converter is Fixed)
 

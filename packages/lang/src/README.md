@@ -5,9 +5,9 @@ A high-performance parser for the Oddo language built with Chevrotain.
 ## Features
 
 - ✅ Complete Oddo language support
-- ✅ Indentation-based blocks
+- ✅ Brace-based blocks (JavaScript-style)
 - ✅ JSX syntax
-- ✅ Modifiers
+- ✅ Modifiers with runtime library imports
 - ✅ All JavaScript operators with correct precedence
 - ✅ Arrow functions
 - ✅ Arrays, objects, and all data types
