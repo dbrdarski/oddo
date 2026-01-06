@@ -62,7 +62,7 @@ server.listen(PORT, () => {
 ║                                            ║
 ║   @oddo/ui Playground Server Running!      ║
 ║                                            ║
-║   URL: http://localhost:${PORT}              ║
+║   URL: http://localhost:${PORT}               ║
 ║                                            ║
 ║   Press Ctrl+C to stop                     ║
 ║                                            ║

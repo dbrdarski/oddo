@@ -200,6 +200,36 @@ const MODIFIER_TRANSFORMATIONS = {
       return t.expressionStatement(mutateCall);
     },
   },
+  effect: {
+    // @effect (() => setWhatever(x)) -> _effect((setWhatever, x) => { setWhatever()(x()) }, [setWhatever, x])
+    transform: (valueExpr) => {
+      // effect must be an arrow function
+      if (valueExpr.type !== 'ArrowFunctionExpression') {
+        throw new Error('effect modifier must be a function');
+      }
+
+      // Extract dependencies from the function body (not params, those are local)
+      const identifiers = extractIdentifiers(valueExpr.body);
+      const params = identifiers.map(id => t.identifier(id));
+      const deps = identifiers.map(id => t.identifier(id));
+
+      // Create new arrow function with dependencies as params
+      const body = t.isBlockStatement(valueExpr.body) 
+        ? valueExpr.body 
+        : t.blockStatement([t.expressionStatement(valueExpr.body)]);
+      const arrowFunc = t.arrowFunctionExpression(params, body);
+
+      // Wrap dependency references with call expressions
+      wrapDependenciesWithCalls(arrowFunc, identifiers);
+
+      const effectCall = t.callExpression(
+        t.identifier(modifierAliases['effect']),
+        [arrowFunc, t.arrayExpression(deps)]
+      );
+
+      return t.expressionStatement(effectCall);
+    },
+  },
 };
 
 // Track which modifiers are used in the current compilation
@@ -227,7 +257,7 @@ export function compileToJS(ast, config = {}) {
   modifierAliases = {};
 
   // First pass: Convert AST with temporary placeholder identifiers
-  const allModifiers = ['state', 'computed', 'react', 'mutate'];
+  const allModifiers = ['state', 'computed', 'react', 'mutate', 'effect'];
   for (const modifier of allModifiers) {
     modifierAliases[modifier] = `__ODDO_MODIFIER_${modifier}__`;
   }

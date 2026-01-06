@@ -46,7 +46,7 @@ const InputBinding = () => {
     ),
     e('div', { class: 'display' },
       e('strong', {}, 'You typed: '),
-      x(x => x(), [computed((text) => text() || '(nothing yet)', [text])])
+      x((text) => text() || '(nothing yet)', [text])
     ),
     e('div', { class: 'display' },
       e('strong', {}, 'Character count: '),
