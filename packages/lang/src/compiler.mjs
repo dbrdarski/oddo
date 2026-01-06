@@ -184,12 +184,17 @@ let needsOddoImport = false;
 /**
  * Convert Oddo AST to Babel AST and generate JavaScript code
  * @param {Object} ast - Oddo AST (program node)
+ * @param {Object} config - Compilation configuration options
+ * @param {string} config.runtimeLibrary - Runtime library to import (defaults to '@oddo/ui')
  * @returns {string} Generated JavaScript code
  */
-export function compileToJS(ast) {
+export function compileToJS(ast, config = {}) {
   if (!ast || ast.type !== 'program') {
     throw new Error('Expected a program AST node');
   }
+
+  // Extract configuration with defaults
+  const runtimeLibrary = config.runtimeLibrary || '@oddo/ui';
 
   // Reset the $Oddo import flag
   needsOddoImport = false;
@@ -200,7 +205,7 @@ export function compileToJS(ast) {
   if (needsOddoImport) {
     const importDeclaration = t.importDeclaration(
       [t.importDefaultSpecifier(t.identifier('$Oddo'))],
-      t.stringLiteral('next-lang/ui')
+      t.stringLiteral(runtimeLibrary)
     );
     babelAST.body.unshift(importDeclaration);
   }

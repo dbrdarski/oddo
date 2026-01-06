@@ -90,12 +90,12 @@ export function parseOddoExpression(input) {
   return ast;
 }
 
-export function compileOddoToJS(input) {
+export function compileOddoToJS(input, config = {}) {
   const ast = parseOddo(input);
-  return compileToJS(ast);
+  return compileToJS(ast, config);
 }
 
-export function compileOddoExpressionToJS(input) {
+export function compileOddoExpressionToJS(input, config = {}) {
   const ast = parseOddoExpression(input);
-  return compileToJS(ast);
+  return compileToJS(ast, config);
 }

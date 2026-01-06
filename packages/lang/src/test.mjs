@@ -252,7 +252,7 @@ test('Modifier on return', () => {
 
 test('State modifier transformation', () => {
   const js = compileOddoToJS('@state x = 3');
-  assert(js.includes('import $Oddo from "next-lang/ui"'), 'Should import $Oddo');
+  assert(js.includes('import $Oddo from "@oddo/ui"'), 'Should import $Oddo');
   assert(js.includes('$Oddo.state(3)'), 'Should transform to $Oddo.state(3)');
 });
 
@@ -271,6 +271,12 @@ test('Multiple state modifiers only import once', () => {
   assert(importCount === 1, 'Should only import $Oddo once');
   assert(js.includes('$Oddo.state(3)'), 'Should have first state call');
   assert(js.includes('$Oddo.state(5)'), 'Should have second state call');
+});
+
+test('Custom runtime library configuration', () => {
+  const js = compileOddoToJS('@state x = 3', { runtimeLibrary: 'my-custom-lib' });
+  assert(js.includes('import $Oddo from "my-custom-lib"'), 'Should import from custom library');
+  assert(js.includes('$Oddo.state(3)'), 'Should transform to $Oddo.state(3)');
 });
 
 test('Computed modifier extracts identifiers', () => {
