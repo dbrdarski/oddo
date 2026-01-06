@@ -714,6 +714,17 @@ function convertAssignment(cst) {
     if (opToken) {
       const left = convertDestructuringPattern(destructuringPattern);
       const right = convertExpression(getFirstChild(cst, 'assignment'));
+      
+      // In Oddo, = is a declaration, := is an assignment
+      if (opToken.image === '=') {
+        return {
+          type: 'variableDeclaration',
+          operator: '=',
+          left,
+          right,
+        };
+      }
+      
       return {
         type: 'assignment',
         operator: opToken.image,
@@ -766,6 +777,17 @@ function convertAssignment(cst) {
         }
       }
 
+      // In Oddo, = is a declaration (const), := is an assignment
+      if (opToken.image === '=') {
+        return {
+          type: 'variableDeclaration',
+          operator: '=',
+          left,
+          right,
+        };
+      }
+
+      // := and compound assignments (+=:, etc.) are true assignments
       return {
         type: 'assignment',
         operator: opToken.image,

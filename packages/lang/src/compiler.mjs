@@ -314,7 +314,7 @@ function convertExpressionStatement(stmt) {
       let leftExpr = null;
 
       // If it's a declaration (=) or assignment (:=), extract both left and right sides
-      if (stmt.expression.type === 'assignment' && (stmt.expression.operator === '=' || stmt.expression.operator === ':=')) {
+      if (stmt.expression.type === 'variableDeclaration' || stmt.expression.type === 'assignment') {
         leftExpr = convertExpression(stmt.expression.left);
         valueExpr = convertExpression(stmt.expression.right);
       } else {
@@ -353,7 +353,7 @@ function convertExpressionStatement(stmt) {
           let leftExpr = null;
 
           // If it's a declaration (=) or assignment (:=), extract both left and right sides
-          if (blockStmt.expression.type === 'assignment' && (blockStmt.expression.operator === '=' || blockStmt.expression.operator === ':=')) {
+          if (blockStmt.expression.type === 'variableDeclaration' || blockStmt.expression.type === 'assignment') {
             leftExpr = convertExpression(blockStmt.expression.left);
             valueExpr = convertExpression(blockStmt.expression.right);
           } else {
@@ -380,6 +380,16 @@ function convertExpressionStatement(stmt) {
       // So we'll return them as a block statement
       return t.blockStatement(transformedStatements);
     }
+  }
+
+  // In Oddo, = is a declaration (const), := is an assignment (expression)
+  // Handle variable declaration before converting as expression
+  if (stmt.expression && stmt.expression.type === 'variableDeclaration') {
+    const left = convertExpression(stmt.expression.left);
+    const right = convertExpression(stmt.expression.right);
+    return t.variableDeclaration('const', [
+      t.variableDeclarator(left, right)
+    ]);
   }
 
   let expression = null;
@@ -417,24 +427,6 @@ function convertExpressionStatement(stmt) {
 
   if (!expression) {
     throw new Error('Expression statement must have expression or block');
-  }
-
-  // In Oddo, = is a declaration (const), := is an assignment (expression)
-  if (stmt.expression && stmt.expression.type === 'assignment' && stmt.expression.operator === '=') {
-    // Check if left-hand side is a member access (a.b.c) or array slice (arr[3...6])
-    // These cannot be declarations and must use := instead
-    if (stmt.expression.left.type === 'memberAccess') {
-      throw new Error('Member access assignments must use := operator, not =');
-    }
-    if (stmt.expression.left.type === 'arraySlice') {
-      throw new Error('Array slice assignments must use := operator, not =');
-    }
-
-    const left = convertExpression(stmt.expression.left);
-    const right = convertExpression(stmt.expression.right);
-    return t.variableDeclaration('const', [
-      t.variableDeclarator(left, right)
-    ]);
   }
 
   // := operator is an assignment expression, not a declaration
@@ -1105,29 +1097,27 @@ function convertExportDefaultStatement(stmt) {
 function convertExportNamedStatement(stmt) {
   if (stmt.declaration) {
     // export x = 1 (named export of declaration) or export x := 1 (named export of assignment)
-    // Convert = to export const x = 1, := to export assignment expression
     const exprStmt = stmt.declaration;
-    if (exprStmt.type === 'expressionStatement' && exprStmt.expression && exprStmt.expression.type === 'assignment') {
-      const assignment = exprStmt.expression;
-      // Only = is a declaration, := is an assignment expression
-      if (assignment.operator === '=') {
-        const id = convertExpression(assignment.left);
-        const init = convertExpression(assignment.right);
+    if (exprStmt.type === 'expressionStatement' && exprStmt.expression) {
+      // Variable declaration: export x = 1
+      if (exprStmt.expression.type === 'variableDeclaration') {
+        const id = convertExpression(exprStmt.expression.left);
+        const init = convertExpression(exprStmt.expression.right);
         const declaration = t.variableDeclaration('const', [
           t.variableDeclarator(id, init)
         ]);
         return t.exportNamedDeclaration(declaration, []);
-      } else {
-        // := is an assignment expression - convert to regular assignment
-        // Note: JavaScript doesn't support export x = 3 directly, so we'll convert it
-        // For now, treat := exports the same as = exports (const declaration)
-        // This might need refinement based on language design
-      const id = convertExpression(assignment.left);
-      const init = convertExpression(assignment.right);
-      const declaration = t.variableDeclaration('const', [
-        t.variableDeclarator(id, init)
-      ]);
-      return t.exportNamedDeclaration(declaration, []);
+      }
+      // Assignment: export x := 1
+      // Note: JavaScript doesn't support export x = 3 directly, so we'll convert it
+      // to a const declaration for compatibility
+      if (exprStmt.expression.type === 'assignment') {
+        const id = convertExpression(exprStmt.expression.left);
+        const init = convertExpression(exprStmt.expression.right);
+        const declaration = t.variableDeclaration('const', [
+          t.variableDeclarator(id, init)
+        ]);
+        return t.exportNamedDeclaration(declaration, []);
       }
     }
     // Fallback: try to convert as-is

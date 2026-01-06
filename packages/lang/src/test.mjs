@@ -151,7 +151,7 @@ test('Assignment statement (should be declaration)', () => {
   assert(ast.body.length === 1, 'Should have 1 statement');
   const stmt = ast.body[0];
   assert(stmt.type === 'expressionStatement', 'Should be expression statement');
-  assert(stmt.expression.type === 'assignment', 'Should be assignment');
+  assert(stmt.expression.type === 'variableDeclaration', 'Should be variableDeclaration');
 });
 
 test('Destructuring assignment (should be declaration)', () => {
@@ -160,7 +160,7 @@ test('Destructuring assignment (should be declaration)', () => {
   assert(ast.body.length === 1, 'Should have 1 statement');
   const stmt = ast.body[0];
   assert(stmt.type === 'expressionStatement', 'Should be expression statement');
-  assert(stmt.expression.type === 'assignment', 'Should be assignment');
+  assert(stmt.expression.type === 'variableDeclaration', 'Should be variableDeclaration');
   assertASTType(stmt.expression.left, 'objectPattern', 'Left should be object pattern');
 });
 
@@ -170,7 +170,7 @@ test('Array destructuring assignment (should be declaration)', () => {
   assert(ast.body.length === 1, 'Should have 1 statement');
   const stmt = ast.body[0];
   assert(stmt.type === 'expressionStatement', 'Should be expression statement');
-  assert(stmt.expression.type === 'assignment', 'Should be assignment');
+  assert(stmt.expression.type === 'variableDeclaration', 'Should be variableDeclaration');
   assertASTType(stmt.expression.left, 'arrayPattern', 'Left should be array pattern');
 });
 
@@ -197,7 +197,7 @@ test('Arrow function with block body', () => {
   const ast = parseOddo('fn = arg => {\n  x = 10\n  y = 20\n}');
   assertASTType(ast, 'program');
   const stmt = ast.body[0];
-  assertASTType(stmt.expression, 'assignment');
+  assertASTType(stmt.expression, 'variableDeclaration');
   assertASTType(stmt.expression.right, 'arrowFunction', 'Right side should be arrow function');
   assert(stmt.expression.right.body.type === 'blockStatement', 'Should have block body');
   assert(stmt.expression.right.body.body.length === 2, 'Block should have 2 statements');
@@ -218,7 +218,7 @@ test('Arrow function block with return', () => {
   const ast = parseOddo('fn = arg => {\n  x = 10\n  return x\n}');
   assertASTType(ast, 'program');
   const stmt = ast.body[0];
-  assertASTType(stmt.expression, 'assignment');
+  assertASTType(stmt.expression, 'variableDeclaration');
   assertASTType(stmt.expression.right, 'arrowFunction', 'Right side should be arrow function');
   assert(stmt.expression.right.body.type === 'blockStatement', 'Should have block body');
   assert(stmt.expression.right.body.body.length === 2, 'Block should have 2 statements');
@@ -420,7 +420,7 @@ test('Parenthesized expression with line break', () => {
   const ast = parseOddo('x = (a + b\n  + c)');
   assertASTType(ast, 'program');
   assertASTType(ast.body[0], 'expressionStatement');
-  assertASTType(ast.body[0].expression, 'assignment');
+  assertASTType(ast.body[0].expression, 'variableDeclaration');
 });
 
 test('Expression without parens should fail on line break', () => {
@@ -650,7 +650,7 @@ test('Arrow function with destructuring parameter and default value', () => {
 
 test('Nested object destructuring pattern', () => {
   const ast = parseOddoExpression('{ props: { options = [], name, outlined, label, oncreate, ...props }, children } = {}');
-  assertASTType(ast, 'assignment');
+  assertASTType(ast, 'variableDeclaration');
   assertASTType(ast.left, 'objectPattern');
   assert(ast.left.properties.length === 2, 'Should have two properties');
 
