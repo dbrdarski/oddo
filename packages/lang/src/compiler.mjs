@@ -179,6 +179,9 @@ const MODIFIER_TRANSFORMATIONS = {
         const setterBaseName = 'set' + getterName.charAt(0).toUpperCase() + getterName.slice(1);
         const setterName = generateUniqueId(setterBaseName);
         
+        // Track state-to-setter mapping for @mutate validation
+        stateSetterMap.set(getterName, setterName);
+        
         return t.variableDeclaration('const', [
           t.variableDeclarator(
             t.arrayPattern([
@@ -243,16 +246,162 @@ const MODIFIER_TRANSFORMATIONS = {
     },
   },
   mutate: {
-    // @mutate addPerson = (x) => ... -> const addPerson = _mutate((x) => { ... })
-    transform: (valueExpr, leftExpr) => {
-      // mutate must be an arrow function
-      if (valueExpr.type !== 'ArrowFunctionExpression') {
-        throw new Error('mutate modifier must be a function');
+    // @mutate x = (arg1, arg2) => { x1 := value1; x2 := value2 }
+    // -> const x = mutate((finalizer, x1, x2, ...outerDeps, arg1, arg2) => { ... }, finalizerFn, stateContainers, outerDeps)
+    transform: (oddoExpr, leftExpr) => {
+      // mutate must be an arrow function (Oddo AST)
+      if (oddoExpr.type !== 'arrowFunction') {
+        throw new Error('@mutate modifier must be a function');
       }
 
+      // Extract function parameters
+      const funcParams = (oddoExpr.parameters || []).map(p => p.name);
+      
+      // Find all := assignments in the function body
+      const stateAssignments = []; // { name, rightExpr (Oddo AST) }
+      const bodyStatements = oddoExpr.body?.body || [];
+      
+      for (const stmt of bodyStatements) {
+        if (stmt.type === 'expressionStatement' && 
+            stmt.expression?.type === 'assignment' && 
+            stmt.expression?.operator === ':=') {
+          const leftName = stmt.expression.left?.name;
+          if (!leftName) {
+            throw new Error('@mutate: := assignment must have an identifier on the left side');
+          }
+          // Validate that this is a @state variable
+          if (!stateSetterMap.has(leftName)) {
+            throw new Error(`@mutate: Cannot mutate '${leftName}': not a @state variable in current scope`);
+          }
+          stateAssignments.push({
+            name: leftName,
+            setter: stateSetterMap.get(leftName),
+            rightOddo: stmt.expression.right
+          });
+        }
+      }
+      
+      if (stateAssignments.length === 0) {
+        throw new Error('@mutate function must contain at least one := assignment');
+      }
+      
+      const stateContainerNames = stateAssignments.map(a => a.name);
+      
+      // Collect outer dependencies from all := right-hand sides
+      const outerDeps = new Set();
+      for (const assignment of stateAssignments) {
+        collectOddoIdentifiers(assignment.rightOddo).forEach(id => {
+          if (!funcParams.includes(id) && !stateContainerNames.includes(id)) {
+            outerDeps.add(id);
+          }
+        });
+      }
+      const outerDepsArray = Array.from(outerDeps);
+      
+      // Build the mutate function body
+      // Parameters: (finalizer, ...stateContainers, ...outerDeps, ...originalParams)
+      const mutateParams = [
+        t.identifier('finalizer'),
+        ...stateContainerNames.map(n => t.identifier(n)),
+        ...outerDepsArray.map(n => t.identifier(n)),
+        ...funcParams.map(n => t.identifier(n))
+      ];
+      
+      // Build body statements: stateContainer = stateProxy(rightExpr with deps wrapped)
+      usedModifiers.add('stateProxy');
+      const mutateBodyStmts = [];
+      
+      // Set of all identifiers that need to be called (state containers + outer deps)
+      const callableIds = new Set([...stateContainerNames, ...outerDepsArray]);
+      
+      for (const assignment of stateAssignments) {
+        // Convert right side to Babel AST
+        const rightBabel = convertExpression(assignment.rightOddo);
+        
+        // Wrap identifiers that are callable (state containers or outer deps) with ()
+        const tempFile = t.file(t.program([t.expressionStatement(rightBabel)]));
+        const toReplace = [];
+        const shorthandToExpand = [];
+        traverse(tempFile, {
+          noScope: true,
+          Identifier(path) {
+            const parent = path.parent;
+            const isMemberProp = t.isMemberExpression(parent) && parent.property === path.node && !parent.computed;
+            const isObjectKey = t.isObjectProperty(parent) && parent.key === path.node && !parent.shorthand;
+            const isShorthand = t.isObjectProperty(parent) && parent.shorthand && parent.key === path.node;
+            
+            if (callableIds.has(path.node.name) && !isMemberProp && !isObjectKey) {
+              if (isShorthand) {
+                shorthandToExpand.push({ prop: parent, name: path.node.name });
+              } else {
+                toReplace.push(path);
+              }
+            }
+          }
+        });
+        shorthandToExpand.forEach(({ prop, name }) => {
+          prop.shorthand = false;
+          prop.value = t.callExpression(t.identifier(name), []);
+        });
+        toReplace.forEach(p => p.replaceWith(t.callExpression(t.identifier(p.node.name), [])));
+        
+        // Get the modified expression from tempFile
+        const wrappedRightExpr = tempFile.program.body[0].expression;
+        
+        // stateContainer = stateProxy(rightExpr)
+        mutateBodyStmts.push(
+          t.expressionStatement(
+            t.assignmentExpression(
+              '=',
+              t.identifier(assignment.name),
+              t.callExpression(
+                t.identifier(modifierAliases['stateProxy']),
+                [wrappedRightExpr]
+              )
+            )
+          )
+        );
+      }
+      
+      // Add finalizer call: finalizer(x1(), x2(), x3())
+      mutateBodyStmts.push(
+        t.expressionStatement(
+          t.callExpression(
+            t.identifier('finalizer'),
+            stateContainerNames.map(n => t.callExpression(t.identifier(n), []))
+          )
+        )
+      );
+      
+      const mutateArrowFunc = t.arrowFunctionExpression(
+        mutateParams,
+        t.blockStatement(mutateBodyStmts)
+      );
+      
+      // Build finalizer function: (x1, x2, x3) => (setX1(x1), setX2(x2), setX3(x3))
+      const finalizerParams = stateContainerNames.map(n => t.identifier(n));
+      const finalizerCalls = stateAssignments.map(a => 
+        t.callExpression(t.identifier(a.setter), [t.identifier(a.name)])
+      );
+      const finalizerBody = finalizerCalls.length === 1 
+        ? finalizerCalls[0]
+        : t.sequenceExpression(finalizerCalls);
+      const finalizerFunc = t.arrowFunctionExpression(finalizerParams, finalizerBody);
+      
+      // Build state containers array: [x1, x2, x3]
+      const stateContainersArray = t.arrayExpression(
+        stateContainerNames.map(n => t.identifier(n))
+      );
+      
+      // Build outer deps array: [outOfScopeDep]
+      const outerDepsArrayExpr = t.arrayExpression(
+        outerDepsArray.map(n => t.identifier(n))
+      );
+      
+      // Build the mutate call
       const mutateCall = t.callExpression(
         t.identifier(modifierAliases['mutate']),
-        [valueExpr]
+        [mutateArrowFunc, finalizerFunc, stateContainersArray, outerDepsArrayExpr]
       );
 
       if (leftExpr) {
@@ -301,6 +450,8 @@ let usedModifiers = new Set();
 let modifierAliases = {};
 // Set of used names for collision avoidance (populated before conversion)
 let usedNames = new Set();
+// Map from state variable names to their setter names (for @mutate validation)
+let stateSetterMap = new Map();
 
 // UID generator that avoids collisions (available during conversion)
 function generateUniqueId(baseName) {
@@ -353,11 +504,13 @@ export function compileToJS(ast, config = {}) {
   usedModifiers = new Set();
   modifierAliases = {};
   usedNames = collectOddoIdentifiers(ast);
+  stateSetterMap = new Map();
 
   // First pass: Convert AST with temporary placeholder identifiers
   // Modifiers: state, computed, react, mutate, effect
   // JSX Pragmas: e (element), c (component), x (expression), f (fragment)
-  const allImports = ['state', 'computed', 'react', 'mutate', 'effect', 'e', 'c', 'x', 'f'];
+  // Helpers: stateProxy
+  const allImports = ['state', 'computed', 'react', 'mutate', 'effect', 'stateProxy', 'e', 'c', 'x', 'f'];
   for (const name of allImports) {
     modifierAliases[name] = `__ODDO_IMPORT_${name}__`;
   }
@@ -498,10 +651,19 @@ function convertExpressionStatement(stmt) {
       // If it's a declaration (=) or assignment (:=), extract both left and right sides
       if (stmt.expression.type === 'variableDeclaration' || stmt.expression.type === 'assignment') {
         leftExpr = convertExpression(stmt.expression.left);
-        valueExpr = convertExpression(stmt.expression.right);
+        // For mutate modifier, pass original Oddo AST for special processing
+        if (stmt.modifier === 'mutate') {
+          valueExpr = stmt.expression.right; // Oddo AST, not converted
+        } else {
+          valueExpr = convertExpression(stmt.expression.right);
+        }
       } else {
         // Otherwise, use the expression itself as the value
-        valueExpr = convertExpression(stmt.expression);
+        if (stmt.modifier === 'mutate') {
+          valueExpr = stmt.expression; // Oddo AST, not converted
+        } else {
+          valueExpr = convertExpression(stmt.expression);
+        }
       }
 
       // Apply the modifier transformation
