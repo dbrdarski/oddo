@@ -84,9 +84,9 @@ function extractIdentifiers(babelNode) {
 function wrapDependenciesWithCalls(arrowFunc, deps) {
   const depSet = new Set(deps);
   const locals = new Set();
-  
+
   const tempFile = t.file(t.program([t.expressionStatement(arrowFunc)]));
-  
+
   // Collect local bindings from nested arrow functions
   traverse(tempFile, {
     noScope: true,
@@ -114,7 +114,7 @@ function wrapDependenciesWithCalls(arrowFunc, deps) {
       const isObjectKey = t.isObjectProperty(parent) && parent.key === path.node && !parent.shorthand;
       // Handle shorthand properties specially: { c } -> { c: c() }
       const isShorthand = t.isObjectProperty(parent) && parent.shorthand && parent.key === path.node;
-      
+
       if (depSet.has(path.node.name) && !isMemberProp && !isObjectKey && !locals.has(path.node.name)) {
         if (isShorthand) {
           shorthandToExpand.push({ prop: parent, name: path.node.name });
@@ -133,31 +133,32 @@ function wrapDependenciesWithCalls(arrowFunc, deps) {
 }
 
 // Create a reactive expression call: _x((deps...) => expr with deps(), [deps...])
-function createReactiveExpr(valueExpr) {
+function createReactiveExpr(valueExpr, attrExpression = false) {
   const identifiers = extractIdentifiers(valueExpr);
-  
+  const pragma = attrExpression ? 'computed' : 'x'
+
   if (identifiers.length === 0) {
     // No dependencies - just return the expression directly if it's a literal
     if (t.isLiteral(valueExpr)) {
       return valueExpr;
     }
     // Otherwise wrap with empty deps
-    usedModifiers.add('x');
+    usedModifiers.add(pragma);
     const arrowFunc = t.arrowFunctionExpression([], valueExpr);
     return t.callExpression(
-      t.identifier(modifierAliases['x']),
+      t.identifier(modifierAliases[pragma]),
       [arrowFunc, t.arrayExpression([])]
     );
   }
-  
-  usedModifiers.add('x');
+
+  usedModifiers.add(pragma);
   const params = identifiers.map(id => t.identifier(id));
   const deps = identifiers.map(id => t.identifier(id));
   const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
   wrapDependenciesWithCalls(arrowFunc, identifiers);
-  
+
   return t.callExpression(
-    t.identifier(modifierAliases['x']),
+    t.identifier(modifierAliases[pragma]),
     [arrowFunc, t.arrayExpression(deps)]
   );
 }
@@ -178,10 +179,10 @@ const MODIFIER_TRANSFORMATIONS = {
         const getterName = leftExpr.name;
         const setterBaseName = 'set' + getterName.charAt(0).toUpperCase() + getterName.slice(1);
         const setterName = generateUniqueId(setterBaseName);
-        
+
         // Track state-to-setter mapping for @mutate validation
         stateSetterMap.set(getterName, setterName);
-        
+
         return t.variableDeclaration('const', [
           t.variableDeclarator(
             t.arrayPattern([
@@ -256,14 +257,14 @@ const MODIFIER_TRANSFORMATIONS = {
 
       // Extract function parameters
       const funcParams = (oddoExpr.parameters || []).map(p => p.name);
-      
+
       // Find all := assignments in the function body
       const stateAssignments = []; // { name, rightExpr (Oddo AST) }
       const bodyStatements = oddoExpr.body?.body || [];
-      
+
       for (const stmt of bodyStatements) {
-        if (stmt.type === 'expressionStatement' && 
-            stmt.expression?.type === 'assignment' && 
+        if (stmt.type === 'expressionStatement' &&
+            stmt.expression?.type === 'assignment' &&
             stmt.expression?.operator === ':=') {
           const leftName = stmt.expression.left?.name;
           if (!leftName) {
@@ -280,13 +281,13 @@ const MODIFIER_TRANSFORMATIONS = {
           });
         }
       }
-      
+
       if (stateAssignments.length === 0) {
         throw new Error('@mutate function must contain at least one := assignment');
       }
-      
+
       const stateContainerNames = stateAssignments.map(a => a.name);
-      
+
       // Collect outer dependencies from all := right-hand sides
       const outerDeps = new Set();
       for (const assignment of stateAssignments) {
@@ -297,7 +298,7 @@ const MODIFIER_TRANSFORMATIONS = {
         });
       }
       const outerDepsArray = Array.from(outerDeps);
-      
+
       // Build the mutate function body
       // Parameters: (finalizer, ...stateContainers, ...outerDeps, ...originalParams)
       const mutateParams = [
@@ -306,18 +307,18 @@ const MODIFIER_TRANSFORMATIONS = {
         ...outerDepsArray.map(n => t.identifier(n)),
         ...funcParams.map(n => t.identifier(n))
       ];
-      
+
       // Build body statements: stateContainer = stateProxy(rightExpr with deps wrapped)
       usedModifiers.add('stateProxy');
       const mutateBodyStmts = [];
-      
+
       // Set of all identifiers that need to be called (state containers + outer deps)
       const callableIds = new Set([...stateContainerNames, ...outerDepsArray]);
-      
+
       for (const assignment of stateAssignments) {
         // Convert right side to Babel AST
         const rightBabel = convertExpression(assignment.rightOddo);
-        
+
         // Wrap identifiers that are callable (state containers or outer deps) with ()
         const tempFile = t.file(t.program([t.expressionStatement(rightBabel)]));
         const toReplace = [];
@@ -329,7 +330,7 @@ const MODIFIER_TRANSFORMATIONS = {
             const isMemberProp = t.isMemberExpression(parent) && parent.property === path.node && !parent.computed;
             const isObjectKey = t.isObjectProperty(parent) && parent.key === path.node && !parent.shorthand;
             const isShorthand = t.isObjectProperty(parent) && parent.shorthand && parent.key === path.node;
-            
+
             if (callableIds.has(path.node.name) && !isMemberProp && !isObjectKey) {
               if (isShorthand) {
                 shorthandToExpand.push({ prop: parent, name: path.node.name });
@@ -344,10 +345,10 @@ const MODIFIER_TRANSFORMATIONS = {
           prop.value = t.callExpression(t.identifier(name), []);
         });
         toReplace.forEach(p => p.replaceWith(t.callExpression(t.identifier(p.node.name), [])));
-        
+
         // Get the modified expression from tempFile
         const wrappedRightExpr = tempFile.program.body[0].expression;
-        
+
         // stateContainer = stateProxy(rightExpr)
         mutateBodyStmts.push(
           t.expressionStatement(
@@ -362,7 +363,7 @@ const MODIFIER_TRANSFORMATIONS = {
           )
         );
       }
-      
+
       // Add finalizer call: finalizer(x1(), x2(), x3())
       mutateBodyStmts.push(
         t.expressionStatement(
@@ -372,32 +373,32 @@ const MODIFIER_TRANSFORMATIONS = {
           )
         )
       );
-      
+
       const mutateArrowFunc = t.arrowFunctionExpression(
         mutateParams,
         t.blockStatement(mutateBodyStmts)
       );
-      
+
       // Build finalizer function: (x1, x2, x3) => (setX1(x1), setX2(x2), setX3(x3))
       const finalizerParams = stateContainerNames.map(n => t.identifier(n));
-      const finalizerCalls = stateAssignments.map(a => 
+      const finalizerCalls = stateAssignments.map(a =>
         t.callExpression(t.identifier(a.setter), [t.identifier(a.name)])
       );
-      const finalizerBody = finalizerCalls.length === 1 
+      const finalizerBody = finalizerCalls.length === 1
         ? finalizerCalls[0]
         : t.sequenceExpression(finalizerCalls);
       const finalizerFunc = t.arrowFunctionExpression(finalizerParams, finalizerBody);
-      
+
       // Build state containers array: [x1, x2, x3]
       const stateContainersArray = t.arrayExpression(
         stateContainerNames.map(n => t.identifier(n))
       );
-      
+
       // Build outer deps array: [outOfScopeDep]
       const outerDepsArrayExpr = t.arrayExpression(
         outerDepsArray.map(n => t.identifier(n))
       );
-      
+
       // Build the mutate call
       const mutateCall = t.callExpression(
         t.identifier(modifierAliases['mutate']),
@@ -426,8 +427,8 @@ const MODIFIER_TRANSFORMATIONS = {
       const deps = identifiers.map(id => t.identifier(id));
 
       // Create new arrow function with dependencies as params
-      const body = t.isBlockStatement(valueExpr.body) 
-        ? valueExpr.body 
+      const body = t.isBlockStatement(valueExpr.body)
+        ? valueExpr.body
         : t.blockStatement([t.expressionStatement(valueExpr.body)]);
       const arrowFunc = t.arrowFunctionExpression(params, body);
 
@@ -467,11 +468,11 @@ function generateUniqueId(baseName) {
 // Collect all identifiers from Oddo AST before conversion
 function collectOddoIdentifiers(node, names = new Set()) {
   if (!node || typeof node !== 'object') return names;
-  
+
   if (node.type === 'identifier') {
     names.add(node.name);
   }
-  
+
   // Recursively traverse all object properties
   for (const key of Object.keys(node)) {
     if (key === 'type') continue;
@@ -517,7 +518,7 @@ export function compileToJS(ast, config = {}) {
 
   const babelAST = convertProgram(ast);
   const fileAST = t.file(babelAST);
-  
+
   // Also collect identifiers from generated Babel AST (in case conversion added any)
   traverse(fileAST, {
     noScope: true,
@@ -527,7 +528,7 @@ export function compileToJS(ast, config = {}) {
       }
     }
   });
-  
+
   // UID generator that avoids collisions
   const generateUid = (name) => {
     let candidate = `_${name}`;
@@ -547,7 +548,7 @@ export function compileToJS(ast, config = {}) {
     tempToUnique[tempName] = uniqueName;
     modifierAliases[name] = uniqueName;
   }
-  
+
   // Replace all temporary identifiers with unique ones
   if (Object.keys(tempToUnique).length > 0) {
     traverse(fileAST, {
@@ -668,7 +669,7 @@ function convertExpressionStatement(stmt) {
 
       // Apply the modifier transformation
       const { transform } = modifierTransform;
-      
+
       // Track that this modifier is used
       usedModifiers.add(stmt.modifier);
 
@@ -707,7 +708,7 @@ function convertExpressionStatement(stmt) {
 
           // Apply the modifier transformation
           const { transform } = modifierTransform;
-          
+
           // Track that this modifier is used
           usedModifiers.add(stmt.modifier);
 
@@ -1377,17 +1378,17 @@ function convertJSXElement(expr) {
   const isComponent = /^[A-Z]/.test(tagName);
   const pragma = isComponent ? 'c' : 'e';
   usedModifiers.add(pragma);
-  
+
   // Check if any attribute is a spread
   const hasSpread = expr.attributes.some(attr => attr.type === 'jsxSpread');
-  
+
   let propsArg;
-  
+
   if (hasSpread) {
     // With spread: wrap entire props object in _x()
     // _x((deps...) => ({ ...spread(), attr: value() }), [deps...])
     const properties = [];
-    
+
     for (const attr of expr.attributes) {
       if (attr.type === 'jsxSpread') {
         properties.push(t.spreadElement(convertExpression(attr.expression)));
@@ -1406,20 +1407,20 @@ function convertJSXElement(expr) {
         properties.push(t.objectProperty(key, value));
       }
     }
-    
+
     const propsObj = t.objectExpression(properties);
-    propsArg = createReactiveExpr(propsObj);
+    propsArg = createReactiveExpr(propsObj, true);
   } else if (expr.attributes.length === 0) {
     // No attributes
     propsArg = t.nullLiteral();
   } else {
     // No spread: build object with individual _x() for expressions
     const properties = [];
-    
+
     for (const attr of expr.attributes) {
       const key = t.identifier(attr.name);
       let value;
-      
+
       if (attr.value === null) {
         // Boolean attribute: disabled -> {disabled: true}
         value = t.booleanLiteral(true);
@@ -1428,28 +1429,28 @@ function convertJSXElement(expr) {
         value = t.stringLiteral(attr.value.value);
       } else if (attr.value.type === 'expression') {
         // Expression: value={x} -> {value: _x((x) => x(), [x])}
-        const innerExpr = convertExpression(attr.value.value);
+        const innerExpr = convertExpression(attr.value.value, true);
         value = createReactiveExpr(innerExpr);
       } else {
         const innerExpr = convertExpression(attr.value);
-        value = createReactiveExpr(innerExpr);
+        value = createReactiveExpr(innerExpr, true);
       }
-      
+
       properties.push(t.objectProperty(key, value));
     }
-    
+
     propsArg = t.objectExpression(properties);
   }
-  
+
   // Convert children
   const children = expr.children
     .map(convertJSXChild)
     .filter(Boolean);
-  
+
   // Build pragma call: _e("div", props, ...children) or _c(Component, props, ...children)
   const tagArg = isComponent ? t.identifier(tagName) : t.stringLiteral(tagName);
   const args = [tagArg, propsArg, ...children];
-  
+
   return t.callExpression(
     t.identifier(modifierAliases[pragma]),
     args
@@ -1461,11 +1462,11 @@ function convertJSXElement(expr) {
  */
 function convertJSXFragment(expr) {
   usedModifiers.add('f');
-  
+
   const children = expr.children
     .map(convertJSXChild)
     .filter(Boolean);
-  
+
   return t.callExpression(
     t.identifier(modifierAliases['f']),
     children
