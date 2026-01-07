@@ -131,7 +131,7 @@ export const stateProxy = (target, mutable, notifyParent) => {
 //   setX(x)
 //   setY(y)
 // }, [x, y], [])
-const empty = Objecy.freeze([])
+const empty = Object.freeze([])
 export const mutate = (mutator, targets, otherValues = empty) => {
   otherValues = bindDependencies(otherValues)
   return (...args) => {

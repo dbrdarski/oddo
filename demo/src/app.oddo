@@ -1,0 +1,140 @@
+// Oddo Demo App
+// A reactive SPA built with the Oddo language and @oddo/ui
+
+import { state, computed, mount } from "@oddo/ui"
+
+// ========================================
+// Counter Component
+// Demonstrates reactive state and event handlers
+// ========================================
+Counter = () => {
+  [count, setCount] = state(0)
+  
+  increment = () => { setCount(count.get() + 1) }
+  decrement = () => { setCount(count.get() - 1) }
+  reset = () => { setCount(0) }
+  
+  return <div class="card">
+    <h2>Counter</h2>
+    <p class="card-description">Click buttons to see reactive state updates</p>
+    <div class="display">
+      <div class="label">Current Count</div>
+      <div class="value">{count}</div>
+    </div>
+    <div class="controls">
+      <button class="primary" onclick={increment}>+ Increment</button>
+      <button class="secondary" onclick={decrement}>- Decrement</button>
+      <button class="danger" onclick={reset}>Reset</button>
+    </div>
+  </div>
+}
+
+
+// ========================================
+// Name Combiner Component  
+// Demonstrates multiple state values and computed
+// ========================================
+NameCombiner = () => {
+  [firstName, setFirstName] = state("Jane")
+  [lastName, setLastName] = state("Doe")
+  fullName = computed((first, last) => first() + " " + last(), [firstName, lastName])
+  
+  handleFirstName = (e) => { setFirstName(e.target.value) }
+  handleLastName = (e) => { setLastName(e.target.value) }
+  
+  return <div class="card">
+    <h2>Computed Values</h2>
+    <p class="card-description">Full name is computed from first and last name inputs</p>
+    <div class="form-group">
+      <label>First Name:</label>
+      <input type="text" value={firstName} oninput={handleFirstName} />
+    </div>
+    <div class="form-group">
+      <label>Last Name:</label>
+      <input type="text" value={lastName} oninput={handleLastName} />
+    </div>
+    <div class="display">
+      <div class="label">Full Name</div>
+      <div class="value">{fullName}</div>
+    </div>
+  </div>
+}
+
+
+// ========================================
+// Temperature Converter Component
+// Demonstrates computed conversions
+// ========================================
+TemperatureConverter = () => {
+  [celsius, setCelsius] = state(20)
+  fahrenheit = computed((c) => (c() * 9 / 5) + 32, [celsius])
+  kelvin = computed((c) => c() + 273.15, [celsius])
+  
+  handleInput = (e) => { setCelsius(parseFloat(e.target.value) || 0) }
+  
+  return <div class="card">
+    <h2>Temperature Converter</h2>
+    <p class="card-description">Computed conversions update reactively</p>
+    <div class="form-group">
+      <label>Celsius:</label>
+      <input type="text" value={celsius} oninput={handleInput} />
+    </div>
+    <div class="display">
+      <div class="label">Fahrenheit</div>
+      <div class="value">{fahrenheit}</div>
+    </div>
+    <div class="display">
+      <div class="label">Kelvin</div>
+      <div class="value">{kelvin}</div>
+    </div>
+  </div>
+}
+
+
+// ========================================
+// Click Tracker Component
+// Demonstrates simple click events
+// ========================================
+ClickTracker = () => {
+  [clicks, setClicks] = state(0)
+  [lastClick, setLastClick] = state("Never")
+  
+  handleClick = () => {
+    setClicks(clicks.get() + 1)
+    setLastClick("Just now!")
+  }
+  
+  return <div class="card">
+    <h2>Click Tracker</h2>
+    <p class="card-description">Track your clicks with reactive updates</p>
+    <div class="display">
+      <div class="label">Total Clicks</div>
+      <div class="value">{clicks}</div>
+    </div>
+    <div class="display">
+      <div class="label">Last Click</div>
+      <div class="value">{lastClick}</div>
+    </div>
+    <div class="controls">
+      <button class="primary" onclick={handleClick}>Click Me!</button>
+    </div>
+  </div>
+}
+
+
+// ========================================
+// Main App
+// ========================================
+App = () => {
+  return <div>
+    <Counter />
+    <NameCombiner />
+    <TemperatureConverter />
+    <ClickTracker />
+  </div>
+}
+
+
+// Mount the app
+app = document.getElementById("app")
+app ? mount(app, <App />) : console.error("Could not find #app element")

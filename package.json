@@ -13,7 +13,11 @@
     "build:lang": "npm run build --workspace=@oddo/lang",
     "playground": "node examples/server.mjs",
     "dev": "npm run build:ui && npm run playground",
-    "demo:lang": "nodemon packages/lang/src/web-demo.mjs"
+    "demo:lang": "nodemon packages/lang/src/web-demo.mjs",
+    "demo:build": "node demo/build.mjs",
+    "demo:serve": "node demo/server.mjs",
+    "demo:watch": "node demo/build.mjs --watch",
+    "demo": "npm run demo:build && npm run demo:serve"
   },
   "dependencies": {
     "nodemon": "^3.1.11",
