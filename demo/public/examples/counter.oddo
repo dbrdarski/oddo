@@ -1,0 +1,20 @@
+// Counter Component
+
+import { mount } from "@oddo/ui"
+
+Counter = () => {
+  @state count = 0
+  @mutate modifyCount = (amount) => {
+    count := count + amount
+  }
+  increment = () => { modifyCount(1) }
+  decrement = () => { modifyCount(-1) }
+
+  return <div style="padding: 20px; font-family: sans-serif;">
+    <h2>Count: {count}</h2>
+    <button onclick={increment}>+</button>
+    <button onclick={decrement}>-</button>
+  </div>
+}
+
+mount(document.body, <Counter />)

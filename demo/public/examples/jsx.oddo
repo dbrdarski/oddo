@@ -1,0 +1,40 @@
+// JSX in Oddo
+
+import { mount } from "@oddo/ui"
+
+// Simple element
+SimpleDiv = () => {
+  return <div>Hello World</div>
+}
+
+// Element with attributes
+StyledBox = () => {
+  return <div class="box" style="padding: 10px; background: #eee;">
+    Styled content
+  </div>
+}
+
+// Element with children
+Card = () => {
+  @state title = "My Card"
+  @mutate setTitle = (value) => {
+    title := value
+  }
+
+  return <div class="card">
+    <h2>{title}</h2>
+    <p>Card content goes here</p>
+    <button onclick={() => { setTitle("Updated!") }}>Update</button>
+  </div>
+}
+
+// Component composition
+App = () => {
+  return <div style="padding: 20px; font-family: sans-serif;">
+    <SimpleDiv />
+    <StyledBox />
+    <Card />
+  </div>
+}
+
+mount(document.body, <App />)

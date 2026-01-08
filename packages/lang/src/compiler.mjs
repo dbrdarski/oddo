@@ -1429,8 +1429,8 @@ function convertJSXElement(expr) {
         value = t.stringLiteral(attr.value.value);
       } else if (attr.value.type === 'expression') {
         // Expression: value={x} -> {value: _x((x) => x(), [x])}
-        const innerExpr = convertExpression(attr.value.value, true);
-        value = createReactiveExpr(innerExpr);
+        const innerExpr = convertExpression(attr.value.value);
+        value = createReactiveExpr(innerExpr, true);
       } else {
         const innerExpr = convertExpression(attr.value);
         value = createReactiveExpr(innerExpr, true);

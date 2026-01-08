@@ -1,140 +1,239 @@
-// Oddo Demo App
-// A reactive SPA built with the Oddo language and @oddo/ui
+// Oddo Language Playground
+// Written in Oddo, compiled to JS
 
-import { state, computed, mount } from "@oddo/ui"
+import { mount } from "@oddo/ui"
 
-// ========================================
-// Counter Component
-// Demonstrates reactive state and event handlers
-// ========================================
-Counter = () => {
-  [count, setCount] = state(0)
-  
-  increment = () => { setCount(count.get() + 1) }
-  decrement = () => { setCount(count.get() - 1) }
-  reset = () => { setCount(0) }
-  
-  return <div class="card">
-    <h2>Counter</h2>
-    <p class="card-description">Click buttons to see reactive state updates</p>
-    <div class="display">
-      <div class="label">Current Count</div>
-      <div class="value">{count}</div>
-    </div>
-    <div class="controls">
-      <button class="primary" onclick={increment}>+ Increment</button>
-      <button class="secondary" onclick={decrement}>- Decrement</button>
-      <button class="danger" onclick={reset}>Reset</button>
-    </div>
-  </div>
-}
+// Main Playground Component
+Playground = () => {
+  @state input = ""
+  @state output = "// Output will appear here..."
+  @state outputMode = "js"
+  @state hasError = false
+  @state parseTime = "--"
+  @state nodeCount = "--"
+  @state outputSize = "--"
+  @state lastAST = null
+  @state lastJS = null
 
-
-// ========================================
-// Name Combiner Component  
-// Demonstrates multiple state values and computed
-// ========================================
-NameCombiner = () => {
-  [firstName, setFirstName] = state("Jane")
-  [lastName, setLastName] = state("Doe")
-  fullName = computed((first, last) => first() + " " + last(), [firstName, lastName])
-  
-  handleFirstName = (e) => { setFirstName(e.target.value) }
-  handleLastName = (e) => { setLastName(e.target.value) }
-  
-  return <div class="card">
-    <h2>Computed Values</h2>
-    <p class="card-description">Full name is computed from first and last name inputs</p>
-    <div class="form-group">
-      <label>First Name:</label>
-      <input type="text" value={firstName} oninput={handleFirstName} />
-    </div>
-    <div class="form-group">
-      <label>Last Name:</label>
-      <input type="text" value={lastName} oninput={handleLastName} />
-    </div>
-    <div class="display">
-      <div class="label">Full Name</div>
-      <div class="value">{fullName}</div>
-    </div>
-  </div>
-}
-
-
-// ========================================
-// Temperature Converter Component
-// Demonstrates computed conversions
-// ========================================
-TemperatureConverter = () => {
-  [celsius, setCelsius] = state(20)
-  fahrenheit = computed((c) => (c() * 9 / 5) + 32, [celsius])
-  kelvin = computed((c) => c() + 273.15, [celsius])
-  
-  handleInput = (e) => { setCelsius(parseFloat(e.target.value) || 0) }
-  
-  return <div class="card">
-    <h2>Temperature Converter</h2>
-    <p class="card-description">Computed conversions update reactively</p>
-    <div class="form-group">
-      <label>Celsius:</label>
-      <input type="text" value={celsius} oninput={handleInput} />
-    </div>
-    <div class="display">
-      <div class="label">Fahrenheit</div>
-      <div class="value">{fahrenheit}</div>
-    </div>
-    <div class="display">
-      <div class="label">Kelvin</div>
-      <div class="value">{kelvin}</div>
-    </div>
-  </div>
-}
-
-
-// ========================================
-// Click Tracker Component
-// Demonstrates simple click events
-// ========================================
-ClickTracker = () => {
-  [clicks, setClicks] = state(0)
-  [lastClick, setLastClick] = state("Never")
-  
-  handleClick = () => {
-    setClicks(clicks.get() + 1)
-    setLastClick("Just now!")
+  // Mutations for state updates
+  @mutate updateInput = (value) => {
+    input := value
   }
-  
-  return <div class="card">
-    <h2>Click Tracker</h2>
-    <p class="card-description">Track your clicks with reactive updates</p>
-    <div class="display">
-      <div class="label">Total Clicks</div>
-      <div class="value">{clicks}</div>
+
+  @mutate updateOutput = (value) => {
+    output := value
+  }
+
+  @mutate updateOutputMode = (value) => {
+    outputMode := value
+  }
+
+  @mutate updateHasError = (value) => {
+    hasError := value
+  }
+
+  @mutate updateParseTime = (value) => {
+    parseTime := value
+  }
+
+  @mutate updateNodeCount = (value) => {
+    nodeCount := value
+  }
+
+  @mutate updateOutputSize = (value) => {
+    outputSize := value
+  }
+
+  @mutate updateLastAST = (value) => {
+    lastAST := value
+  }
+
+  @mutate updateLastJS = (value) => {
+    lastJS := value
+  }
+
+  // Compile function
+  doCompile = () => {
+    code = input.get()
+    code.trim() == "" ? showEmpty() : sendCompile(code)
+  }
+
+  showEmpty = () => {
+    updateOutput("// No input")
+    updateHasError(false)
+    updateParseTime("--")
+    updateNodeCount("--")
+    updateOutputSize("--")
+  }
+
+  sendCompile = (code) => {
+    startTime = performance.now()
+    fetch("/compile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: code })
+    })
+    .then((res) => res.json())
+    .then((result) => handleResult(result, startTime))
+    .catch((err) => handleError(err.message))
+  }
+
+  handleResult = (result, startTime) => {
+    elapsed = Math.round(performance.now() - startTime)
+    result.error ? handleError(result.error) : handleSuccess(result, elapsed)
+  }
+
+  handleSuccess = (result, elapsed) => {
+    updateHasError(false)
+    updateLastAST(result.ast)
+    updateLastJS(result.js)
+    updateParseTime(elapsed + "ms")
+    updateNodeCount(countNodes(result.ast))
+    updateOutputSize(result.js.length + " B")
+    showOutput()
+  }
+
+  handleError = (msg) => {
+    updateHasError(true)
+    updateOutput("// Error: " + msg)
+    updateParseTime("error")
+    updateNodeCount("--")
+    updateOutputSize("--")
+  }
+
+  showOutput = () => {
+    mode = outputMode.get()
+    mode == "js" ? updateOutput(lastJS.get()) : updateOutput(JSON.stringify(lastAST.get(), null, 2))
+  }
+
+  countNodes = (obj) => {
+    obj == null ? 0 : typeof obj != "object" ? 0 : Object.keys(obj).reduce((sum, k) => sum + countNodes(obj[k]), 1)
+  }
+
+  // Load example
+  loadExample = (name) => {
+    name == "" ? null : fetchExample(name)
+  }
+
+  fetchExample = (name) => {
+    fetch("/examples/" + name + ".oddo")
+    .then((res) => res.text())
+    .then((code) => {
+      updateInput(code)
+      document.getElementById("input-area").value := code
+      doCompile()
+    })
+  }
+
+  // Toggle output mode
+  toggleMode = (mode) => {
+    updateOutputMode(mode)
+    lastJS.get() ? showOutput() : null
+  }
+
+  // Run in preview
+  runPreview = () => {
+    js = lastJS.get()
+    js ? executePreview(js) : null
+  }
+
+  executePreview = (js) => {
+    frame = document.getElementById("preview-frame")
+    fetch("/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ js: js })
+    })
+    .then((res) => res.text())
+    .then((html) => {
+      frame.srcdoc := html
+    })
+  }
+
+  // Handle input changes with debounce
+  debounce = { timer: null }
+  handleInput = (e) => {
+    updateInput(e.target.value)
+    debounce.timer ? clearTimeout(debounce.timer) : null
+    debounce.timer := setTimeout(doCompile, 300)
+  }
+
+  handleKeyDown = (e) => {
+    (e.ctrlKey || e.metaKey) && e.key == "Enter" ? doRunPreview(e) : null
+  }
+
+  doRunPreview = (e) => {
+    e.preventDefault()
+    runPreview()
+  }
+
+  return <div class="layout">
+    <header>
+      <div class="logo">&lt;oddo/&gt;</div>
+      <div class="divider"></div>
+      <div class="title">Language Playground</div>
+    </header>
+
+    <div class="editor-row">
+      <div class="panel">
+        <div class="panel-header">
+          <h3>Input</h3>
+          <select onchange={(e) => { loadExample(e.target.value) }}>
+            <option value="">Load example...</option>
+            <option value="counter">Counter</option>
+            <option value="computed">Computed</option>
+            <option value="primitives">Primitives</option>
+            <option value="operators">Operators</option>
+            <option value="jsx">JSX</option>
+            <option value="modifiers">Modifiers</option>
+          </select>
+        </div>
+        <div class="panel-content">
+          <textarea
+            id="input-area"
+            oninput={handleInput}
+            onkeydown={handleKeyDown}
+            placeholder="// Write Oddo code here..."
+          ></textarea>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <h3>Output</h3>
+          <div class="output-toggle">
+            <button
+              class={outputMode == "js" ? "active" : ""}
+              onclick={() => { toggleMode("js") }}
+            >JS</button>
+            <button
+              class={outputMode == "ast" ? "active" : ""}
+              onclick={() => { toggleMode("ast") }}
+            >AST</button>
+          </div>
+        </div>
+        <div class="panel-content">
+          <div id="output-area" class={hasError ? "output-area error" : "output-area"}>{output}</div>
+        </div>
+        <div class="stats-bar">
+          <span>Parse: {parseTime}</span>
+          <span>Nodes: {nodeCount}</span>
+          <span>Size: {outputSize}</span>
+        </div>
+      </div>
     </div>
-    <div class="display">
-      <div class="label">Last Click</div>
-      <div class="value">{lastClick}</div>
-    </div>
-    <div class="controls">
-      <button class="primary" onclick={handleClick}>Click Me!</button>
+
+    <div class="preview-section">
+      <div class="preview-header">
+        <h3>Preview</h3>
+        <button class="run-btn" onclick={runPreview}>Run</button>
+      </div>
+      <div class="preview-content">
+        <iframe id="preview-frame" sandbox="allow-scripts"></iframe>
+      </div>
     </div>
   </div>
 }
-
-
-// ========================================
-// Main App
-// ========================================
-App = () => {
-  return <div>
-    <Counter />
-    <NameCombiner />
-    <TemperatureConverter />
-    <ClickTracker />
-  </div>
-}
-
 
 // Mount the app
-app = document.getElementById("app")
-app ? mount(app, <App />) : console.error("Could not find #app element")
+mount(document.getElementById("app"), <Playground />)

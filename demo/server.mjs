@@ -1,21 +1,33 @@
 #!/usr/bin/env node
 /**
- * Oddo Demo Development Server
+ * Oddo Playground Server
  * 
- * Serves the compiled demo files with live reload support.
+ * Serves the playground and handles compilation requests.
  */
 
 import http from 'http'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import * as esbuild from 'esbuild'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const PORT = process.env.PORT || 3030
+const PORT = process.env.PORT || 3032
 const DIST_DIR = path.join(__dirname, 'dist')
 const PACKAGES_DIR = path.join(__dirname, '..', 'packages')
+const UI_PACKAGE = path.join(PACKAGES_DIR, 'ui', 'src', 'index.mjs')
+
+// Import compiler
+const langPath = path.join(PACKAGES_DIR, 'lang', 'src', 'index.mjs')
+let parseOddo, compileOddoToJS
+
+async function loadCompiler() {
+  const lang = await import(langPath)
+  parseOddo = lang.parseOddo
+  compileOddoToJS = lang.compileOddoToJS
+}
 
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -24,121 +36,158 @@ const MIME_TYPES = {
   '.css': 'text/css',
   '.json': 'application/json',
   '.png': 'image/png',
-  '.jpg': 'image/jpg',
-  '.gif': 'image/gif',
   '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
+  '.oddo': 'text/plain',
 }
 
-/**
- * Resolve import paths for ES modules
- * Maps bare imports like '@oddo/ui' to actual file paths
- */
-function resolveImport(filePath, content) {
-  // Only process JS files
-  if (!filePath.endsWith('.js') && !filePath.endsWith('.mjs')) {
-    return content
-  }
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://localhost:${PORT}`)
+  console.log(`${req.method} ${url.pathname}`)
 
-  // Replace @oddo/ui imports with relative path to packages
-  return content.replace(
-    /from\s+["']@oddo\/ui["']/g,
-    `from "/packages/ui/dist/index.mjs"`
-  )
-}
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
-const server = http.createServer((req, res) => {
-  console.log(`${req.method} ${req.url}`)
-
-  // Parse URL
-  let urlPath = req.url.split('?')[0]
-  
-  // Default to index.html for root
-  if (urlPath === '/') {
-    urlPath = '/index.html'
-  }
-
-  let fullPath
-  let isPackageRequest = false
-
-  // Handle package requests (for @oddo/ui imports)
-  if (urlPath.startsWith('/packages/')) {
-    fullPath = path.join(PACKAGES_DIR, urlPath.replace('/packages/', ''))
-    isPackageRequest = true
-  } else {
-    fullPath = path.join(DIST_DIR, urlPath)
-  }
-
-  // Security: prevent directory traversal
-  const normalizedPath = path.normalize(fullPath)
-  const allowedPaths = [DIST_DIR, PACKAGES_DIR]
-  
-  if (!allowedPaths.some(p => normalizedPath.startsWith(p))) {
-    res.writeHead(403, { 'Content-Type': 'text/html' })
-    res.end('<h1>403 Forbidden</h1>', 'utf-8')
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200)
+    res.end()
     return
   }
 
-  // Get file extension
-  const extname = String(path.extname(fullPath)).toLowerCase()
+  // Compile endpoint
+  if (url.pathname === '/compile' && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => { body += chunk.toString() })
+    req.on('end', () => {
+      try {
+        const { code } = JSON.parse(body)
+        
+        // Parse to AST
+        const ast = parseOddo(code)
+        
+        // Compile to JS
+        const js = compileOddoToJS(code, { runtimeLibrary: '@oddo/ui' })
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ast, js }))
+      } catch (err) {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: err.message }))
+      }
+    })
+    return
+  }
+  
+  // Preview endpoint - compiles and bundles user code
+  if (url.pathname === '/preview' && req.method === 'POST') {
+    let body = ''
+    req.on('data', chunk => { body += chunk.toString() })
+    req.on('end', async () => {
+      try {
+        const { js } = JSON.parse(body)
+        
+        // Bundle the compiled JS with esbuild (resolving @oddo/ui)
+        const result = await esbuild.build({
+          stdin: {
+            contents: js,
+            loader: 'js',
+            resolveDir: __dirname
+          },
+          bundle: true,
+          treeShaking: true,
+          format: 'iife',
+          platform: 'browser',
+          target: ['es2020'],
+          write: false,
+          alias: {
+            '@oddo/ui': UI_PACKAGE
+          },
+          logLevel: 'silent'
+        })
+        
+        const bundledCode = result.outputFiles[0].text
+        
+        // Build preview HTML
+        const html = `<!DOCTYPE html>
+<html><head><style>body{margin:0;font-family:system-ui,sans-serif;}</style></head>
+<body>
+<script>
+try {
+${bundledCode}
+} catch(e) {
+  document.body.innerHTML='<pre style="color:red;padding:20px;">Error: '+e.message+'</pre>';
+}
+</script>
+</body></html>`
+        
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end(html)
+      } catch (err) {
+        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.end(`<pre style="color:red;padding:20px;">Bundle Error: ${err.message}</pre>`)
+      }
+    })
+    return
+  }
+
+  // Static file serving
+  let filePath = url.pathname === '/' ? '/index.html' : url.pathname
+  
+  // Handle package requests
+  if (filePath.startsWith('/packages/')) {
+    const fullPath = path.join(PACKAGES_DIR, filePath.replace('/packages/', ''))
+    return serveFile(res, fullPath)
+  }
+
+  // Serve from dist dir
+  const fullPath = path.join(DIST_DIR, filePath)
+  serveFile(res, fullPath)
+})
+
+function serveFile(res, filePath) {
+  const extname = path.extname(filePath).toLowerCase()
   const contentType = MIME_TYPES[extname] || 'application/octet-stream'
 
-  fs.readFile(fullPath, (error, content) => {
-    if (error) {
-      if (error.code === 'ENOENT') {
-        // Try with .js extension for extensionless imports
-        if (!extname) {
-          fs.readFile(fullPath + '.js', (err, jsContent) => {
-            if (err) {
-              res.writeHead(404, { 'Content-Type': 'text/html' })
-              res.end(`<h1>404 Not Found</h1><p>${req.url}</p>`, 'utf-8')
-            } else {
-              res.writeHead(200, { 
-                'Content-Type': 'application/javascript',
-                'Cache-Control': 'no-cache'
-              })
-              const processed = resolveImport(fullPath + '.js', jsContent.toString())
-              res.end(processed, 'utf-8')
-            }
-          })
-          return
-        }
-        
-        res.writeHead(404, { 'Content-Type': 'text/html' })
-        res.end(`<h1>404 Not Found</h1><p>${req.url}</p>`, 'utf-8')
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      if (err.code === 'ENOENT') {
+        res.writeHead(404, { 'Content-Type': 'text/plain' })
+        res.end('Not Found')
       } else {
-        res.writeHead(500)
-        res.end(`Server Error: ${error.code}`, 'utf-8')
+        res.writeHead(500, { 'Content-Type': 'text/plain' })
+        res.end('Server Error')
       }
-    } else {
-      // Process JS files to resolve imports
-      let processedContent = content
-      if (contentType === 'application/javascript') {
-        processedContent = resolveImport(fullPath, content.toString())
-      }
-
-      res.writeHead(200, { 
-        'Content-Type': contentType,
-        'Cache-Control': 'no-cache'
-      })
-      res.end(processedContent, 'utf-8')
+      return
     }
+
+    res.writeHead(200, { 
+      'Content-Type': contentType,
+      'Cache-Control': 'no-cache'
+    })
+    res.end(content)
   })
-})
+}
 
-server.listen(PORT, () => {
-  console.log(`
-╔══════════════════════════════════════════════╗
-║                                              ║
-║   🚀 Oddo Demo Server Running!               ║
-║                                              ║
-║   Local:   http://localhost:${PORT}             ║
-║                                              ║
-║   Press Ctrl+C to stop                       ║
-║                                              ║
-╚══════════════════════════════════════════════╝
-  `)
-})
+async function start() {
+  await loadCompiler()
+  
+  server.listen(PORT, () => {
+    console.log(`
+╔══════════════════════════════════════════════════╗
+║                                                  ║
+║   ⚡ Oddo Playground                             ║
+║                                                  ║
+║   http://localhost:${PORT}                        ║
+║                                                  ║
+║   Ctrl+C to stop                                 ║
+║                                                  ║
+╚══════════════════════════════════════════════════╝
+    `)
+  })
+}
 
+start().catch(err => {
+  console.error('Failed to start server:', err)
+  process.exit(1)
+})
