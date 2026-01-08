@@ -147,3 +147,5 @@ export const transact = (mutator, finalizer, targets, otherValues = empty) => {
     mutator(finalizer, ...stateProxies, ...otherValues, ...args)
   }
 }
+
+export const lift = (fn, deps) => fn(...bindDependencies(deps))

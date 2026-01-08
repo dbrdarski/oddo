@@ -1,6 +1,6 @@
 # TODOS
 
-- implement @mutable modifier
+- implement @mutable modifier (ok)
 - implement @callback (or with different name) modifier
 - implement lift
 - add lift to consts (escape reactive)
@@ -12,3 +12,7 @@
 - performance tests for the language parser
 - partial application
 - pattern matching
+- pendind state and error state
+- Error Boundry
+- Suspense
+- ...
