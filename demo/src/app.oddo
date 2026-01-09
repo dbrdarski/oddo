@@ -1,20 +1,56 @@
 // Oddo Language Playground
 // Written in Oddo, compiled to JS
 
-import { state, mount } from "@oddo/ui"
+import { mount } from "@oddo/ui"
 
 // Main Playground Component
 Playground = () => {
-  // Using explicit tuple pattern for complex state management
-  [input, setInput] = state("")
-  [output, setOutput] = state("// Output will appear here...")
-  [outputMode, setOutputMode] = state("js")
-  [hasError, setHasError] = state(false)
-  [parseTime, setParseTime] = state("--")
-  [nodeCount, setNodeCount] = state("--")
-  [outputSize, setOutputSize] = state("--")
-  [lastAST, setLastAST] = state(null)
-  [lastJS, setLastJS] = state(null)
+  @state input = ""
+  @state output = "// Output will appear here..."
+  @state outputMode = "js"
+  @state hasError = false
+  @state parseTime = "--"
+  @state nodeCount = "--"
+  @state outputSize = "--"
+  @state lastAST = null
+  @state lastJS = null
+
+  // Mutations for state updates
+  @mutate updateInput = (value) => {
+    input := value
+  }
+
+  @mutate updateOutput = (value) => {
+    output := value
+  }
+
+  @mutate updateOutputMode = (value) => {
+    outputMode := value
+  }
+
+  @mutate updateHasError = (value) => {
+    hasError := value
+  }
+
+  @mutate updateParseTime = (value) => {
+    parseTime := value
+  }
+
+  @mutate updateNodeCount = (value) => {
+    nodeCount := value
+  }
+
+  @mutate updateOutputSize = (value) => {
+    outputSize := value
+  }
+
+  @mutate updateLastAST = (value) => {
+    lastAST := value
+  }
+
+  @mutate updateLastJS = (value) => {
+    lastJS := value
+  }
 
   // Compile function
   doCompile = () => {
@@ -23,11 +59,11 @@ Playground = () => {
   }
 
   showEmpty = () => {
-    setOutput("// No input")
-    setHasError(false)
-    setParseTime("--")
-    setNodeCount("--")
-    setOutputSize("--")
+    updateOutput("// No input")
+    updateHasError(false)
+    updateParseTime("--")
+    updateNodeCount("--")
+    updateOutputSize("--")
   }
 
   sendCompile = (code) => {
@@ -48,26 +84,26 @@ Playground = () => {
   }
 
   handleSuccess = (result, elapsed) => {
-    setHasError(false)
-    setLastAST(result.ast)
-    setLastJS(result.js)
-    setParseTime(elapsed + "ms")
-    setNodeCount(countNodes(result.ast))
-    setOutputSize(result.js.length + " B")
+    updateHasError(false)
+    updateLastAST(result.ast)
+    updateLastJS(result.js)
+    updateParseTime(elapsed + "ms")
+    updateNodeCount(countNodes(result.ast))
+    updateOutputSize(result.js.length + " B")
     showOutput()
   }
 
   handleError = (msg) => {
-    setHasError(true)
-    setOutput("// Error: " + msg)
-    setParseTime("error")
-    setNodeCount("--")
-    setOutputSize("--")
+    updateHasError(true)
+    updateOutput("// Error: " + msg)
+    updateParseTime("error")
+    updateNodeCount("--")
+    updateOutputSize("--")
   }
 
   showOutput = () => {
     mode = outputMode
-    mode == "js" ? setOutput(lastJS) : setOutput(JSON.stringify(lastAST, null, 2))
+    mode == "js" ? updateOutput(lastJS) : updateOutput(JSON.stringify(lastAST, null, 2))
   }
 
   countNodes = (obj) => {
@@ -83,7 +119,7 @@ Playground = () => {
     fetch("/examples/" + name + ".oddo")
     .then((res) => res.text())
     .then((code) => {
-      setInput(code)
+      updateInput(code)
       document.getElementById("input-area").value := code
       doCompile()
     })
@@ -91,7 +127,7 @@ Playground = () => {
 
   // Toggle output mode
   toggleMode = (mode) => {
-    setOutputMode(mode)
+    updateOutputMode(mode)
     lastJS ? showOutput() : null
   }
 
@@ -117,7 +153,7 @@ Playground = () => {
   // Handle input changes with debounce
   debounce = { timer: null }
   handleInput = (e) => {
-    setInput(e.target.value)
+    updateInput(e.target.value)
     debounce.timer ? clearTimeout(debounce.timer) : null
     debounce.timer := setTimeout(doCompile, 300)
   }

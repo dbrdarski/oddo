@@ -133,14 +133,27 @@ function wrapDependenciesWithCalls(arrowFunc, deps) {
 }
 
 // Check if an identifier is known to be non-reactive (@mutable or normal declaration)
-// Uses pre-collected nonReactiveVariables from the Oddo AST pre-pass
+// Uses scope-based lookup with prototypal inheritance
 function isKnownNonReactive(name) {
-  return nonReactiveVariables.has(name);
+  return isNonReactive(name);
 }
 
-// Filter identifiers to get only potentially reactive ones (exclude @mutable and normal declarations)
+// Filter identifiers to get only potentially reactive ones
+// Excludes: undeclared/globals, @mutable, normal declarations
+// Includes: @state, @computed, function params
 function getReactiveDeps(identifiers) {
-  return identifiers.filter(id => !isKnownNonReactive(id));
+  return identifiers.filter(id => {
+    // Undeclared/global → non-reactive (not in any scope)
+    if (!isDeclared(id)) {
+      return false;
+    }
+    // Known non-reactive (@mutable, immutable) → non-reactive
+    if (isNonReactive(id)) {
+      return false;
+    }
+    // Known reactive (state, computed, param) → include
+    return true;
+  });
 }
 
 // Create a lifted expression: _lift((deps...) => expr with deps(), [deps...])
@@ -251,9 +264,7 @@ const MODIFIER_TRANSFORMATIONS = {
       );
 
       if (leftExpr && t.isIdentifier(leftExpr)) {
-        // Track this as a computed variable (reactive)
-        computedVariables.add(leftExpr.name);
-        
+        // Variable is already tracked in scope during pre-pass
         return t.variableDeclaration('const', [
           t.variableDeclarator(leftExpr, computedCall)
         ]);
@@ -561,12 +572,34 @@ let usedNames = new Set();
 let stateSetterMap = new Map();
 // Set of mutable variable names (for @mutate validation)
 let mutableVariables = new Set();
-// Set of computed variable names (reactive)
-let computedVariables = new Set();
-// Set of immutable variable names (normal declarations, non-reactive)
-let immutableVariables = new Set();
-// Set of non-reactive variable names (populated during pre-pass, includes @mutable and normal declarations)
-let nonReactiveVariables = new Set();
+
+// Scope tracking using prototypal inheritance
+// Each scope is an object where keys are variable names and values are { type, reactive }
+// Child scopes inherit from parent scopes via Object.create()
+let moduleScope = null;
+let currentScope = null;
+
+// Variable info structure: { type: 'state'|'computed'|'mutable'|'immutable'|'param', reactive: boolean }
+function declareVariable(name, type) {
+  const reactive = (type === 'state' || type === 'computed' || type === 'param');
+  currentScope[name] = { type, reactive };
+}
+
+function isDeclared(name) {
+  return name in currentScope;
+}
+
+function isReactive(name) {
+  return currentScope[name]?.reactive === true;
+}
+
+function isNonReactive(name) {
+  return currentScope[name]?.reactive === false;
+}
+
+function getVarType(name) {
+  return currentScope[name]?.type;
+}
 
 // UID generator that avoids collisions (available during conversion)
 function generateUniqueId(baseName) {
@@ -580,27 +613,66 @@ function generateUniqueId(baseName) {
 }
 
 // Collect all identifiers from Oddo AST before conversion
-// Also populates nonReactiveVariables with @mutable and normal declaration names
+// Also builds scope chain with variable declarations using prototypal inheritance
 function collectOddoIdentifiers(node, names = new Set()) {
   if (!node || typeof node !== 'object') return names;
+
+  // Initialize module scope for program node
+  if (node.type === 'program') {
+    moduleScope = Object.create(null);
+    currentScope = moduleScope;
+  }
 
   if (node.type === 'identifier') {
     names.add(node.name);
   }
 
-  // Collect non-reactive variable declarations
+  // Collect variable declarations into current scope
   if (node.type === 'expressionStatement') {
     const varName = node.expression?.left?.name;
     if (varName) {
-      // @mutable modifier -> non-reactive
-      if (node.modifier === 'mutable') {
-        nonReactiveVariables.add(varName);
+      // Determine variable type based on modifier
+      if (node.modifier === 'state') {
+        declareVariable(varName, 'state');
+      } else if (node.modifier === 'computed') {
+        declareVariable(varName, 'computed');
+      } else if (node.modifier === 'mutable') {
+        declareVariable(varName, 'mutable');
+      } else if (!node.modifier && node.expression?.type === 'variableDeclaration') {
+        declareVariable(varName, 'immutable');
       }
-      // Normal declaration (no modifier, type = variableDeclaration) -> non-reactive
-      else if (!node.modifier && node.expression?.type === 'variableDeclaration') {
-        nonReactiveVariables.add(varName);
+      // Other modifiers (effect, mutate, react) don't declare named variables in the same way
+    }
+  }
+  
+  // Handle arrow functions - create child scope and add params
+  if (node.type === 'arrowFunction') {
+    // Create child scope
+    const parentScope = currentScope;
+    currentScope = Object.create(parentScope);
+    
+    // Store scope reference on AST node for conversion phase
+    node._scope = currentScope;
+    
+    // Add function parameters to this scope
+    if (node.parameters) {
+      for (const param of node.parameters) {
+        if (param.name) {
+          declareVariable(param.name, 'param');
+        }
       }
     }
+    
+    // Traverse function body in child scope
+    if (node.body) {
+      collectOddoIdentifiers(node.body, names);
+    }
+    
+    // Restore parent scope
+    currentScope = parentScope;
+    
+    // Skip normal traversal for this node (we handled it specially)
+    return names;
   }
 
   // Recursively traverse all object properties
@@ -636,12 +708,11 @@ export function compileToJS(ast, config = {}) {
   modifierAliases = {};
   stateSetterMap = new Map();
   mutableVariables = new Set();
-  computedVariables = new Set();
-  immutableVariables = new Set();
-  nonReactiveVariables = new Set();
+  moduleScope = null;
+  currentScope = null;
   
-  // Pre-pass: collect all identifiers and variable types from Oddo AST
-  // This populates usedNames and nonReactiveVariables in a single traversal
+  // Pre-pass: collect all identifiers and build scope chain with variable types
+  // This populates usedNames and sets up moduleScope/currentScope with prototypal inheritance
   usedNames = collectOddoIdentifiers(ast);
 
   // First pass: Convert AST with temporary placeholder identifiers
@@ -867,10 +938,7 @@ function convertExpressionStatement(stmt) {
     const left = convertExpression(stmt.expression.left);
     const right = convertExpression(stmt.expression.right);
     
-    // Track this as an immutable variable (non-reactive)
-    if (t.isIdentifier(left)) {
-      immutableVariables.add(left.name);
-    }
+    // Variable is already tracked in scope during pre-pass
     
     // Check if expression contains reactive dependencies
     const identifiers = extractIdentifiers(right);
@@ -1101,6 +1169,12 @@ function convertObjectLiteral(expr) {
  * Convert Oddo arrow function to Babel arrow function expression
  */
 function convertArrowFunction(expr) {
+  // Switch to this function's scope (created during pre-pass)
+  const savedScope = currentScope;
+  if (expr._scope) {
+    currentScope = expr._scope;
+  }
+  
   const params = expr.parameters.map(param => {
     if (param.type === 'restElement') {
       return t.restElement(convertExpression(param.argument));
@@ -1136,6 +1210,9 @@ function convertArrowFunction(expr) {
   } else {
     body = null;
   }
+
+  // Restore parent scope
+  currentScope = savedScope;
 
   return t.arrowFunctionExpression(params, body);
 }
