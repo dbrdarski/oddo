@@ -131,12 +131,15 @@ export const stateProxy = (target, mutable, notifyParent) => {
 //   setX(x)
 //   setY(y)
 // }, [x, y], [])
+
+const liftValue = arg => arg?.[reactiveSymbol] ? arg.get() : arg
 const empty = Object.freeze([])
+
 export const mutate = (mutator, targets, otherValues = empty) => {
   otherValues = bindDependencies(otherValues)
   return (...args) => {
     const stateProxies = targets.map(state => stateProxy(state.get()))
-    mutator(...stateProxies, ...otherValues, ...args)
+    mutator(...stateProxies, ...otherValues, ...args.map(liftValue))
   }
 }
 
@@ -144,8 +147,10 @@ export const transact = (mutator, finalizer, targets, otherValues = empty) => {
   otherValues = bindDependencies(otherValues)
   return (...args) => {
     const stateProxies = targets.map(state => stateProxy(state.get())) // we also need to include mutable (LET) variables here
-    mutator(finalizer, ...stateProxies, ...otherValues, ...args)
+    mutator(finalizer, ...stateProxies, ...otherValues, ...args.map(liftValue))
   }
 }
 
 export const lift = (fn, deps) => fn(...bindDependencies(deps))
+export const liftFn = (callbackFn, deps = empty) => (...args) =>
+  callbackFn(...deps.map(liftValue), ...args.map(liftValue))

@@ -1,5 +1,5 @@
 // @oddo/ui entry point
 // Add your UI framework exports here
 
-export { state, computed, effect, transact as mutate, transact, stateProxy, lift } from "./reactive.mjs"
+export { state, computed, effect, transact as mutate, transact, stateProxy, lift, liftFn } from "./reactive.mjs"
 export { createElement as e, createComponent as c, createFragment as f, createJsxExpression as x, mount } from "./dom.mjs";

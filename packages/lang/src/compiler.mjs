@@ -156,8 +156,9 @@ function getReactiveDeps(identifiers) {
   });
 }
 
-// Create a lifted expression: _lift((deps...) => expr with deps(), [deps...])
-// Only wraps reactive deps with (), non-reactive are used directly
+// Create a lifted expression: _lift((deps...) => expr, [deps...])
+// For functions: _liftFn((deps..., originalParams...) => body, [deps...])
+// NO transformation of expression body - runtime handles unwrapping
 function createLiftedExpr(valueExpr, identifiers) {
   const reactiveDeps = getReactiveDeps(identifiers);
   
@@ -166,17 +167,31 @@ function createLiftedExpr(valueExpr, identifiers) {
     return null;
   }
   
-  usedModifiers.add('lift');
-  const params = reactiveDeps.map(id => t.identifier(id));
-  const deps = reactiveDeps.map(id => t.identifier(id));
-  const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
+  const depParams = reactiveDeps.map(id => t.identifier(id));
+  const depsArray = reactiveDeps.map(id => t.identifier(id));
   
-  // Only wrap reactive identifiers with ()
-  wrapDependenciesWithCalls(arrowFunc, reactiveDeps);
+  // Check if valueExpr is a function expression
+  if (t.isArrowFunctionExpression(valueExpr)) {
+    // For functions: use _liftFn, prepend reactive deps to existing params
+    usedModifiers.add('liftFn');
+    
+    // Prepend reactive dep params to original function params
+    const newParams = [...depParams, ...valueExpr.params];
+    const liftedFunc = t.arrowFunctionExpression(newParams, valueExpr.body);
+    
+    return t.callExpression(
+      t.identifier(modifierAliases['liftFn']),
+      [liftedFunc, t.arrayExpression(depsArray)]
+    );
+  }
+  
+  // For non-functions: use _lift
+  usedModifiers.add('lift');
+  const arrowFunc = t.arrowFunctionExpression(depParams, valueExpr);
   
   return t.callExpression(
     t.identifier(modifierAliases['lift']),
-    [arrowFunc, t.arrayExpression(deps)]
+    [arrowFunc, t.arrayExpression(depsArray)]
   );
 }
 
@@ -719,7 +734,7 @@ export function compileToJS(ast, config = {}) {
   // Modifiers: state, computed, react, mutate, effect
   // JSX Pragmas: e (element), c (component), x (expression), f (fragment)
   // Helpers: stateProxy
-  const allImports = ['state', 'computed', 'react', 'mutate', 'effect', 'stateProxy', 'lift', 'e', 'c', 'x', 'f'];
+  const allImports = ['state', 'computed', 'react', 'mutate', 'effect', 'stateProxy', 'lift', 'liftFn', 'e', 'c', 'x', 'f'];
   for (const name of allImports) {
     modifierAliases[name] = `__ODDO_IMPORT_${name}__`;
   }
@@ -1175,6 +1190,25 @@ function convertArrowFunction(expr) {
     currentScope = expr._scope;
   }
   
+  // BEFORE converting body: find reactive deps that will be captured
+  // These will become additional params via _liftFn, so treat them as non-reactive inside
+  const bodyIdentifiers = collectOddoIdentifiersOnly(expr.body);
+  const reactiveDepsForBody = bodyIdentifiers.filter(id => {
+    // Check if it's reactive in parent scope (not current function scope)
+    // and not already a param of this function
+    const isOwnParam = expr.parameters?.some(p => p.name === id);
+    if (isOwnParam) return false;
+    
+    // Check parent scope for reactivity
+    const varInfo = savedScope?.[id];
+    return varInfo?.reactive === true;
+  });
+  
+  // Add reactive deps as virtual params in current scope (so body doesn't wrap them)
+  for (const dep of reactiveDepsForBody) {
+    currentScope[dep] = { type: 'param', reactive: false }; // Treat as non-reactive param
+  }
+  
   const params = expr.parameters.map(param => {
     if (param.type === 'restElement') {
       return t.restElement(convertExpression(param.argument));
@@ -1214,7 +1248,44 @@ function convertArrowFunction(expr) {
   // Restore parent scope
   currentScope = savedScope;
 
+  // If there are reactive deps, wrap with _liftFn
+  if (reactiveDepsForBody.length > 0) {
+    usedModifiers.add('liftFn');
+    
+    // Prepend reactive dep params to original params
+    const depParams = reactiveDepsForBody.map(id => t.identifier(id));
+    const allParams = [...depParams, ...params];
+    const depsArray = reactiveDepsForBody.map(id => t.identifier(id));
+    
+    const liftedFunc = t.arrowFunctionExpression(allParams, body);
+    
+    return t.callExpression(
+      t.identifier(modifierAliases['liftFn']),
+      [liftedFunc, t.arrayExpression(depsArray)]
+    );
+  }
+
   return t.arrowFunctionExpression(params, body);
+}
+
+// Helper: collect identifiers from Oddo AST without side effects
+function collectOddoIdentifiersOnly(node, names = new Set()) {
+  if (!node || typeof node !== 'object') return Array.from(names);
+
+  if (node.type === 'identifier') {
+    names.add(node.name);
+  }
+
+  for (const key of Object.keys(node)) {
+    if (key === 'type') continue;
+    const val = node[key];
+    if (Array.isArray(val)) {
+      val.forEach(item => collectOddoIdentifiersOnly(item, names));
+    } else if (val && typeof val === 'object') {
+      collectOddoIdentifiersOnly(val, names);
+    }
+  }
+  return Array.from(names);
 }
 
 /**
