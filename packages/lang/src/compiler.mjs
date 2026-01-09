@@ -1,4 +1,4 @@
-/**
+ /**
  * Oddo Language Compiler
  * Compiles Oddo AST to JavaScript using Babel
  */
@@ -132,6 +132,41 @@ function wrapDependenciesWithCalls(arrowFunc, deps) {
   toReplace.forEach(p => p.replaceWith(t.callExpression(t.identifier(p.node.name), [])));
 }
 
+// Check if an identifier is known to be non-reactive (@mutable or normal declaration)
+// Uses pre-collected nonReactiveVariables from the Oddo AST pre-pass
+function isKnownNonReactive(name) {
+  return nonReactiveVariables.has(name);
+}
+
+// Filter identifiers to get only potentially reactive ones (exclude @mutable and normal declarations)
+function getReactiveDeps(identifiers) {
+  return identifiers.filter(id => !isKnownNonReactive(id));
+}
+
+// Create a lifted expression: _lift((deps...) => expr with deps(), [deps...])
+// Only wraps reactive deps with (), non-reactive are used directly
+function createLiftedExpr(valueExpr, identifiers) {
+  const reactiveDeps = getReactiveDeps(identifiers);
+  
+  if (reactiveDeps.length === 0) {
+    // No reactive deps - return expression as-is
+    return null;
+  }
+  
+  usedModifiers.add('lift');
+  const params = reactiveDeps.map(id => t.identifier(id));
+  const deps = reactiveDeps.map(id => t.identifier(id));
+  const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
+  
+  // Only wrap reactive identifiers with ()
+  wrapDependenciesWithCalls(arrowFunc, reactiveDeps);
+  
+  return t.callExpression(
+    t.identifier(modifierAliases['lift']),
+    [arrowFunc, t.arrayExpression(deps)]
+  );
+}
+
 // Create a reactive expression call: _x((deps...) => expr with deps(), [deps...])
 function createReactiveExpr(valueExpr, attrExpression = false) {
   const identifiers = extractIdentifiers(valueExpr);
@@ -215,7 +250,10 @@ const MODIFIER_TRANSFORMATIONS = {
         [arrowFunc, t.arrayExpression(deps)]
       );
 
-      if (leftExpr) {
+      if (leftExpr && t.isIdentifier(leftExpr)) {
+        // Track this as a computed variable (reactive)
+        computedVariables.add(leftExpr.name);
+        
         return t.variableDeclaration('const', [
           t.variableDeclarator(leftExpr, computedCall)
         ]);
@@ -493,14 +531,18 @@ const MODIFIER_TRANSFORMATIONS = {
   mutable: {
     needsImport: false,
     // @mutable x = 3 -> let x = 3;
+    // @mutable x = y + 1 (y is @state) -> let x = _lift((y) => y() + 1, [y])
     transform: (valueExpr, leftExpr) => {
-      // No imports needed for mutable
       if (leftExpr && t.isIdentifier(leftExpr)) {
         // Track this as a mutable variable for @mutate validation
         mutableVariables.add(leftExpr.name);
         
+        // Check if expression contains reactive dependencies
+        const identifiers = extractIdentifiers(valueExpr);
+        const liftedExpr = createLiftedExpr(valueExpr, identifiers);
+        
         return t.variableDeclaration('let', [
-          t.variableDeclarator(leftExpr, valueExpr)
+          t.variableDeclarator(leftExpr, liftedExpr || valueExpr)
         ]);
       }
       // If no left side, just return the expression
@@ -519,6 +561,12 @@ let usedNames = new Set();
 let stateSetterMap = new Map();
 // Set of mutable variable names (for @mutate validation)
 let mutableVariables = new Set();
+// Set of computed variable names (reactive)
+let computedVariables = new Set();
+// Set of immutable variable names (normal declarations, non-reactive)
+let immutableVariables = new Set();
+// Set of non-reactive variable names (populated during pre-pass, includes @mutable and normal declarations)
+let nonReactiveVariables = new Set();
 
 // UID generator that avoids collisions (available during conversion)
 function generateUniqueId(baseName) {
@@ -532,11 +580,27 @@ function generateUniqueId(baseName) {
 }
 
 // Collect all identifiers from Oddo AST before conversion
+// Also populates nonReactiveVariables with @mutable and normal declaration names
 function collectOddoIdentifiers(node, names = new Set()) {
   if (!node || typeof node !== 'object') return names;
 
   if (node.type === 'identifier') {
     names.add(node.name);
+  }
+
+  // Collect non-reactive variable declarations
+  if (node.type === 'expressionStatement') {
+    const varName = node.expression?.left?.name;
+    if (varName) {
+      // @mutable modifier -> non-reactive
+      if (node.modifier === 'mutable') {
+        nonReactiveVariables.add(varName);
+      }
+      // Normal declaration (no modifier, type = variableDeclaration) -> non-reactive
+      else if (!node.modifier && node.expression?.type === 'variableDeclaration') {
+        nonReactiveVariables.add(varName);
+      }
+    }
   }
 
   // Recursively traverse all object properties
@@ -570,31 +634,27 @@ export function compileToJS(ast, config = {}) {
   // Reset tracking variables
   usedModifiers = new Set();
   modifierAliases = {};
-  usedNames = collectOddoIdentifiers(ast);
   stateSetterMap = new Map();
   mutableVariables = new Set();
+  computedVariables = new Set();
+  immutableVariables = new Set();
+  nonReactiveVariables = new Set();
+  
+  // Pre-pass: collect all identifiers and variable types from Oddo AST
+  // This populates usedNames and nonReactiveVariables in a single traversal
+  usedNames = collectOddoIdentifiers(ast);
 
   // First pass: Convert AST with temporary placeholder identifiers
   // Modifiers: state, computed, react, mutate, effect
   // JSX Pragmas: e (element), c (component), x (expression), f (fragment)
   // Helpers: stateProxy
-  const allImports = ['state', 'computed', 'react', 'mutate', 'effect', 'stateProxy', 'e', 'c', 'x', 'f'];
+  const allImports = ['state', 'computed', 'react', 'mutate', 'effect', 'stateProxy', 'lift', 'e', 'c', 'x', 'f'];
   for (const name of allImports) {
     modifierAliases[name] = `__ODDO_IMPORT_${name}__`;
   }
 
   const babelAST = convertProgram(ast);
   const fileAST = t.file(babelAST);
-
-  // Also collect identifiers from generated Babel AST (in case conversion added any)
-  traverse(fileAST, {
-    noScope: true,
-    Identifier(path) {
-      if (!path.node.name.startsWith('__ODDO_IMPORT_')) {
-        usedNames.add(path.node.name);
-      }
-    }
-  });
 
   // UID generator that avoids collisions
   const generateUid = (name) => {
@@ -806,8 +866,18 @@ function convertExpressionStatement(stmt) {
   if (stmt.expression && stmt.expression.type === 'variableDeclaration') {
     const left = convertExpression(stmt.expression.left);
     const right = convertExpression(stmt.expression.right);
+    
+    // Track this as an immutable variable (non-reactive)
+    if (t.isIdentifier(left)) {
+      immutableVariables.add(left.name);
+    }
+    
+    // Check if expression contains reactive dependencies
+    const identifiers = extractIdentifiers(right);
+    const liftedExpr = createLiftedExpr(right, identifiers);
+    
     return t.variableDeclaration('const', [
-      t.variableDeclarator(left, right)
+      t.variableDeclarator(left, liftedExpr || right)
     ]);
   }
 
