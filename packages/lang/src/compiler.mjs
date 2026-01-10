@@ -526,22 +526,38 @@ const MODIFIER_TRANSFORMATIONS = {
   effect: {
     needsImport: true,
     // @effect (() => setWhatever(x)) -> _effect((setWhatever, x) => { setWhatever()(x()) }, [setWhatever, x])
-    transform: (valueExpr) => {
-      // effect must be an arrow function
-      if (valueExpr.type !== 'ArrowFunctionExpression') {
+    // Note: receives Oddo AST (not Babel AST) to avoid premature wrapping with _liftFn
+    transform: (oddoExpr) => {
+      // effect must be an arrow function (Oddo AST)
+      if (oddoExpr.type !== 'arrowFunction') {
         throw new Error('effect modifier must be a function');
       }
 
       // Extract dependencies from the function body (not params, those are local)
-      const identifiers = extractIdentifiers(valueExpr.body);
+      // Use Oddo AST identifiers, filter out function's own params, and only keep reactive ones
+      const bodyIdentifiers = collectOddoIdentifiersOnly(oddoExpr.body);
+      const ownParams = new Set((oddoExpr.parameters || []).map(p => p.name));
+      const identifiers = bodyIdentifiers.filter(id => !ownParams.has(id) && isReactive(id));
+      
       const params = identifiers.map(id => t.identifier(id));
       const deps = identifiers.map(id => t.identifier(id));
 
+      // Convert the body from Oddo AST to Babel AST
+      let convertedBody;
+      if (oddoExpr.body && oddoExpr.body.type === 'blockStatement') {
+        // Block body
+        const statements = oddoExpr.body.body.map(stmt => convertStatement(stmt));
+        convertedBody = t.blockStatement(statements);
+      } else if (oddoExpr.body) {
+        // Expression body - wrap in block statement
+        const exprBody = convertExpression(oddoExpr.body);
+        convertedBody = t.blockStatement([t.expressionStatement(exprBody)]);
+      } else {
+        convertedBody = t.blockStatement([]);
+      }
+
       // Create new arrow function with dependencies as params
-      const body = t.isBlockStatement(valueExpr.body)
-        ? valueExpr.body
-        : t.blockStatement([t.expressionStatement(valueExpr.body)]);
-      const arrowFunc = t.arrowFunctionExpression(params, body);
+      const arrowFunc = t.arrowFunctionExpression(params, convertedBody);
 
       // Wrap dependency references with call expressions
       wrapDependenciesWithCalls(arrowFunc, identifiers);
@@ -872,15 +888,15 @@ function convertExpressionStatement(stmt) {
       // If it's a declaration (=) or assignment (:=), extract both left and right sides
       if (stmt.expression.type === 'variableDeclaration' || stmt.expression.type === 'assignment') {
         leftExpr = convertExpression(stmt.expression.left);
-        // For mutate modifier, pass original Oddo AST for special processing
-        if (stmt.modifier === 'mutate') {
+        // For mutate/effect modifier, pass original Oddo AST for special processing
+        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect') {
           valueExpr = stmt.expression.right; // Oddo AST, not converted
         } else {
           valueExpr = convertExpression(stmt.expression.right);
         }
       } else {
         // Otherwise, use the expression itself as the value
-        if (stmt.modifier === 'mutate') {
+        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect') {
           valueExpr = stmt.expression; // Oddo AST, not converted
         } else {
           valueExpr = convertExpression(stmt.expression);

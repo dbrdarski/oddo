@@ -2,6 +2,8 @@
 // Written in Oddo, compiled to JS
 
 import { mount } from "@oddo/ui"
+import { highlightOddo } from "@oddo/lang"
+import { highlight as highlightJS } from "best-highlight"
 
 // Main Playground Component
 Playground = () => {
@@ -59,7 +61,8 @@ Playground = () => {
   }
 
   showEmpty = () => {
-    updateOutput("// No input")
+    outputEl = document.getElementById("output-area")
+    outputEl ? outputEl.textContent := "// No input" : null
     updateHasError(false)
     updateParseTime("--")
     updateNodeCount("--")
@@ -95,7 +98,8 @@ Playground = () => {
 
   handleError = (msg) => {
     updateHasError(true)
-    updateOutput("// Error: " + msg)
+    outputEl = document.getElementById("output-area")
+    outputEl ? outputEl.textContent := "// Error: " + msg : null
     updateParseTime("error")
     updateNodeCount("--")
     updateOutputSize("--")
@@ -103,7 +107,17 @@ Playground = () => {
 
   showOutput = () => {
     mode = outputMode
-    mode == "js" ? updateOutput(lastJS) : updateOutput(JSON.stringify(lastAST, null, 2))
+    outputEl = document.getElementById("output-area")
+    mode == "js" ? showJSOutput(outputEl) : showASTOutput(outputEl)
+  }
+
+  showJSOutput = (el) => {
+    el ? el.innerHTML := highlightJS(String(lastJS), "javascript") : null
+  }
+
+  showASTOutput = (el) => {
+    astStr = JSON.stringify(lastAST, null, 2)
+    el ? el.textContent := astStr : null
   }
 
   countNodes = (obj) => {
@@ -120,6 +134,7 @@ Playground = () => {
     .then((res) => res.text())
     .then((code) => {
       updateInput(code)
+      syncHighlightFromCode(code)
       document.getElementById("input-area").value := code
       doCompile()
     })
@@ -152,13 +167,33 @@ Playground = () => {
 
   // Handle input changes with debounce
   debounce = { timer: null }
-  handleInput = (e) => {
-    updateInput(e.target.value)
+  handleInputEvent = (value) => {
+    updateInput(value)
+    syncHighlightFromCode(value)
     debounce.timer ? clearTimeout(debounce.timer) : null
     debounce.timer := setTimeout(doCompile, 300)
   }
 
-  handleKeyDown = (e) => {
+  syncHighlightFromCode = (codeStr) => {
+    el = document.getElementById("highlight-layer")
+    el ? setInnerHTML(el, highlightOddo(String(codeStr)) + " ") : null
+  }
+
+  setInnerHTML = (element, html) => {
+    element.innerHTML := html
+  }
+
+  handleScrollEvent = (textarea) => {
+    highlight = document.getElementById("highlight-layer")
+    highlight ? syncScroll(highlight, textarea) : null
+  }
+
+  syncScroll = (highlight, textarea) => {
+    highlight.scrollTop := textarea.scrollTop
+    highlight.scrollLeft := textarea.scrollLeft
+  }
+
+  handleKeyDownEvent = (e) => {
     (e.ctrlKey || e.metaKey) && e.key == "Enter" ? doRunPreview(e) : null
   }
 
@@ -189,12 +224,18 @@ Playground = () => {
           </select>
         </div>
         <div class="panel-content">
-          <textarea
-            id="input-area"
-            oninput={handleInput}
-            onkeydown={handleKeyDown}
-            placeholder="// Write Oddo code here..."
-          ></textarea>
+          <div class="editor-container">
+            <pre id="highlight-layer" class="editor-highlight"></pre>
+            <textarea
+              id="input-area"
+              class="editor-textarea"
+              oninput={(e) => { handleInputEvent(e.target.value) }}
+              onkeydown={(e) => { handleKeyDownEvent(e) }}
+              onscroll={(e) => { handleScrollEvent(e.target) }}
+              placeholder="// Write Oddo code here..."
+              spellcheck="false"
+            ></textarea>
+          </div>
         </div>
       </div>
 

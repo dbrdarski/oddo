@@ -27,6 +27,7 @@
     "@babel/generator": "^7.28.5",
     "@babel/traverse": "^7.28.5",
     "@babel/types": "^7.28.5",
+    "best-highlight": "^0.3.0",
     "esbuild": "^0.27.2",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"

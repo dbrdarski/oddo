@@ -87,6 +87,7 @@
       align-items: center;
       gap: 12px;
       flex-shrink: 0;
+      min-height: 50px;
     }
 
     .panel-header h3 {
@@ -119,7 +120,7 @@
       position: relative;
     }
 
-    textarea, .output-area {
+    .output-area {
       width: 100%;
       height: 100%;
       padding: 12px;
@@ -133,8 +134,89 @@
       overflow: auto;
     }
 
-    textarea:focus { outline: none; }
-    textarea::placeholder { color: var(--text-muted); }
+    /* Editor overlay technique for syntax highlighting */
+    .editor-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    .editor-highlight {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 12px;
+      margin: 0;
+      background: var(--bg-input);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow: auto;
+      pointer-events: none;
+      color: var(--text);
+    }
+
+    .editor-textarea {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      padding: 12px;
+      background: transparent;
+      border: none;
+      color: transparent;
+      caret-color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      resize: none;
+      overflow: auto;
+      z-index: 1;
+    }
+
+    .editor-textarea:focus { outline: none; }
+    .editor-textarea::placeholder { color: var(--text-muted); }
+
+    /* Sync selection visibility */
+    .editor-textarea::selection {
+      background: rgba(88, 166, 255, 0.3);
+    }
+
+    /* Syntax highlighting colors - Oddo input */
+    .tok-keyword { color: #ff79c6; }
+    .tok-constant { color: #bd93f9; }
+    .tok-number { color: #bd93f9; }
+    .tok-string { color: #f1fa8c; }
+    .tok-modifier { color: #50fa7b; font-weight: 500; }
+    .tok-comment { color: #6272a4; font-style: italic; }
+    .tok-operator { color: #ff79c6; }
+    .tok-tag { color: #8be9fd; }
+    .tok-punctuation { color: #f8f8f2; }
+    .tok-identifier { color: #f8f8f2; }
+    .tok-text { color: #f8f8f2; }
+
+    /* Syntax highlighting colors - JS output (best-highlight) */
+    .bh-npm-token { font-family: 'JetBrains Mono', monospace; }
+    .bh-npm-keyword { color: #ff79c6; }
+    .bh-npm-string { color: #f1fa8c; }
+    .bh-npm-number { color: #bd93f9; }
+    .bh-npm-comment { color: #6272a4; font-style: italic; }
+    .bh-npm-operator { color: #ff79c6; }
+    .bh-npm-punctuation { color: #f8f8f2; }
+    .bh-npm-function { color: #50fa7b; }
+    .bh-npm-variable { color: #f8f8f2; }
+    .bh-npm-property { color: #8be9fd; }
+    .bh-npm-class { color: #8be9fd; }
+    .bh-npm-boolean { color: #bd93f9; }
+    .bh-npm-null { color: #bd93f9; }
+    .bh-npm-undefined { color: #bd93f9; }
+    .bh-npm-regex { color: #f1fa8c; }
+    .bh-npm-template { color: #f1fa8c; }
 
     .output-area {
       white-space: pre-wrap;

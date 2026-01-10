@@ -7,6 +7,7 @@ import { lexer } from './lexer.mjs';
 import { parser } from './parser.mjs';
 import { convertCSTToAST, convertExpression } from './ast-converter.mjs';
 import { compileToJS } from './compiler.mjs';
+import { highlightOddo, getHighlightingCSS } from './highlighter.mjs';
 
 /**
  * Tokenize input using the standard lexer
@@ -99,3 +100,6 @@ export function compileOddoExpressionToJS(input, config = {}) {
   const ast = parseOddoExpression(input);
   return compileToJS(ast, config);
 }
+
+// Re-export highlighter functions
+export { highlightOddo, getHighlightingCSS };

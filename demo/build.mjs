@@ -17,6 +17,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public')
 const DIST_DIR = path.join(__dirname, 'dist')
 const TEMP_DIR = path.join(__dirname, '.temp')
 const UI_PACKAGE = path.join(__dirname, '..', 'packages', 'ui', 'src', 'index.mjs')
+const LANG_PACKAGE = path.join(__dirname, '..', 'packages', 'lang', 'src', 'index.mjs')
 
 // Import compiler
 const langPath = path.join(__dirname, '..', 'packages', 'lang', 'src', 'index.mjs')
@@ -74,7 +75,8 @@ async function compileAndBundle(srcPath, destPath) {
       platform: 'browser',
       target: ['es2020'],
       alias: {
-        '@oddo/ui': UI_PACKAGE
+        '@oddo/ui': UI_PACKAGE,
+        '@oddo/lang': LANG_PACKAGE
       },
       logLevel: 'silent'
     })
