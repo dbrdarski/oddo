@@ -112,26 +112,6 @@ export const stateProxy = (target, mutable, notifyParent) => {
   return () => target
 }
 
-// @mutate updateXY = (newX, newY, mutable) => {
-//   x := newX
-//   tempX = x
-//   x.z := 3
-//   mutable = x.z
-//   y = y + 1
-// }
-
-// const updateXY = mutate(($, x, y) => (newX) => { // mutate can be added to the deps or ignored
-//     x = stateProxy(newX())
-//     const tempX = x()
-//     x.z = 3
-//     mutable = x.z()
-//     y = stateProxy(y() + 1)
-//     $(x(), y())
-// }, (x, y) => {
-//   setX(x)
-//   setY(y)
-// }, [x, y], [])
-
 const liftValue = arg => arg?.[reactiveSymbol] ? arg.get() : arg
 const empty = Object.freeze([])
 

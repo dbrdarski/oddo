@@ -24,6 +24,6 @@ addOne = (n) => n + 1
 piped = 5 |> double |> addOne
 
 // Assignment operators
-counter = 0
+@mutable counter = 0
 counter +:= 1
 counter *:= 2
