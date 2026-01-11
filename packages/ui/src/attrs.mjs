@@ -30,6 +30,8 @@ const setAttribute = (element, key, value, oldValue) => {
       return element.checked = !!value
     case "selected":
       return element.selected = !!value
+    case "innerHTML":
+      return element.innerHTML = value ?? ""
     default:
       if (value == null || value === false) {
         element.removeAttribute(key)

@@ -5,6 +5,7 @@
 - add lift to consts (escape reactive) (ok)
 - fix mutate arguments (need to be lifted!) (ok)
 - implement @callback (or with different name) modifier (not needed)
+- implement ref attrs
 
 - add coloriser (for web (ok), for VS code, for Zed)
 - add AI library to explain how to use the language properly to AI agents
