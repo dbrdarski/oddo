@@ -69,7 +69,7 @@ mount(document.body, <App />)`
         </div>
 
         <div class="doc-feature">
-          <h3>{atSign} Modifiers</h3>
+          <h3>Value decorators</h3>
           <p>Reactive primitives use the {atSign} prefix for clarity. At a glance, you know what is reactive.</p>
           <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code3) })}</pre>
         </div>
