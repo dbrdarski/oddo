@@ -86,6 +86,7 @@ export const createComponent = (component, props, ...children) => (parent, oldNo
 }
 
 export const render = vdom => {
+  if (Array.isArray(vdom)) return createFragment(...vdom)
   switch (vdom) {
     case true:
     case false:

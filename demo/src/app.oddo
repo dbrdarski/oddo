@@ -49,7 +49,7 @@ mount(document.body, <App />)`
 
       <section class="doc-section">
         <h2>What is Oddo?</h2>
-        <p>Oddo is an experimental language focused on functional programming. It is a JavaScript dialect that treats reactivity as a first-class language primitive and places a stronger emphasis on data immutability.</p>
+        <p>Oddo is an experimental language intended for reactive programming. It is a JavaScript dialect that treats reactivity as a first-class language primitive and places a stronger emphasis on data immutability.</p>
         <p>Oddo ships with its own UI rendering library for fine-grained reactivity and built-in JSX support.</p>
       </section>
 
