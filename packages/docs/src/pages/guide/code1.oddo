@@ -1,0 +1,9 @@
+export default `Counter = () => {
+  @state count = 0
+  @mutate increment = () => {
+    count := count + 1
+  }
+  return <button onclick={increment}>
+    Count: {count}
+  </button>
+}`

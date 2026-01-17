@@ -1,0 +1,17 @@
+{
+  "name": "@oddo/docs",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Documentation for the Oddo framework",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node server.mjs",
+    "dev": "npm run build && npm run serve"
+  },
+  "keywords": [
+    "documentation",
+    "oddo"
+  ],
+  "license": "MIT"
+}
