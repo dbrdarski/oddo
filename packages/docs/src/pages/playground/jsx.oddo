@@ -1,4 +1,4 @@
-// JSX in Oddo
+export default `// JSX in Oddo
 
 import { mount } from "@oddo/ui"
 
@@ -37,4 +37,5 @@ App = () => {
   </div>
 }
 
-mount(document.body, <App />)
+mount(document.body, <App />)`
+

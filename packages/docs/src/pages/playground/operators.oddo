@@ -1,4 +1,4 @@
-// Operators in Oddo
+export default `// Operators in Oddo
 
 // Arithmetic
 x = 1 + 2 * 3
@@ -26,4 +26,5 @@ piped = 5 |> double |> addOne
 // Assignment operators
 @mutable counter = 0
 counter +:= 1
-counter *:= 2
+counter *:= 2`
+

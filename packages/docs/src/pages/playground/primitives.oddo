@@ -1,4 +1,4 @@
-// Primitive Types in Oddo
+export default `// Primitive Types in Oddo
 
 // Numbers
 42
@@ -23,4 +23,5 @@ null
 
 // Objects
 { name: "test", value: 42 }
-{ x: 1, y: 2, label: "point" }
+{ x: 1, y: 2, label: "point" }`
+

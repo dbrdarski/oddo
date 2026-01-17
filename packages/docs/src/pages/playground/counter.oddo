@@ -1,4 +1,4 @@
-// Counter Component
+export default `// Counter Component
 
 import { mount } from "@oddo/ui"
 
@@ -17,4 +17,5 @@ Counter = () => {
   </div>
 }
 
-mount(document.body, <Counter />)
+mount(document.body, <Counter />)`
+

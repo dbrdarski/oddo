@@ -1,6 +1,11 @@
-import { e } from "@oddo/ui"
 import { highlightOddo } from "@oddo/lang"
 import { highlight as highlightJS } from "best-highlight"
+import counterExample from "./playground/counter"
+import computedExample from "./playground/computed"
+import primitivesExample from "./playground/primitives"
+import operatorsExample from "./playground/operators"
+import jsxExample from "./playground/jsx"
+import modifiersExample from "./playground/modifiers"
 
 Playground = () => {
   @state input = ""
@@ -120,20 +125,26 @@ Playground = () => {
     obj == null ? 0 : typeof obj != "object" ? 0 : Object.keys(obj).reduce((sum, k) => sum + countNodes(obj[k]), 1)
   }
 
-  // Load example
-  loadExample = (name) => {
-    name == "" ? null : fetchExample(name)
+  // Examples lookup
+  examples = {
+    counter: counterExample,
+    computed: computedExample,
+    primitives: primitivesExample,
+    operators: operatorsExample,
+    jsx: jsxExample,
+    modifiers: modifiersExample
   }
 
-  fetchExample = (name) => {
-    fetch("/examples/" + name + ".oddo")
-    .then((res) => res.text())
-    .then((code) => {
-      updateInput(code)
-      syncHighlightFromCode(code)
-      document.getElementById("input-area").value := code
-      doCompile()
-    })
+  // Load example
+  loadExample = (name) => {
+    name == "" ? null : applyExample(examples[name])
+  }
+
+  applyExample = (code) => {
+    updateInput(code)
+    syncHighlightFromCode(code)
+    document.getElementById("input-area").value := code
+    doCompile()
   }
 
   // Toggle output mode
@@ -267,4 +278,3 @@ Playground = () => {
 }
 
 export default Playground
-

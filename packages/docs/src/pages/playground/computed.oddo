@@ -1,4 +1,4 @@
-// Computed Values
+export default `// Computed Values
 
 import { mount } from "@oddo/ui"
 
@@ -28,3 +28,5 @@ App = () => {
 }
 
 mount(document.body, <App />)
+`
+

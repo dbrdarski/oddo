@@ -1,4 +1,4 @@
-// Reactive Modifiers Demo
+export default `// Reactive Modifiers Demo
 
 import { mount } from "@oddo/ui"
 
@@ -27,4 +27,5 @@ App = () => {
   </div>
 }
 
-mount(document.body, <App />)
+mount(document.body, <App />)`
+
