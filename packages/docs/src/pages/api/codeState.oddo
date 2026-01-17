@@ -1,0 +1,4 @@
+export default `@state count = 0
+@state items = []
+@state user = { name: "Alice", age: 30 }`
+

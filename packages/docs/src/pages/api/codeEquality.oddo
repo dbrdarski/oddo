@@ -1,0 +1,4 @@
+export default `5 == 5      // true (compiles to ===)
+5 == "5"    // false (strict comparison)
+null == null // true`
+

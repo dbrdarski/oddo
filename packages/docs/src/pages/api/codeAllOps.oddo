@@ -1,0 +1,12 @@
+export default `// Arithmetic
+a + b, a - b, a * b, a / b, a % b, a ** b
+
+// Comparison
+a < b, a > b, a <= b, a >= b, a == b, a != b
+
+// Logical
+a && b, a || b, !a
+
+// Ternary
+condition ? valueIfTrue : valueIfFalse`
+

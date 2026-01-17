@@ -1,0 +1,5 @@
+export default `x => x + 1
+(a, b) => a + b
+() => 42
+(x) => { return x * 2 }`
+

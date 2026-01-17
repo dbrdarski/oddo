@@ -1,0 +1,5 @@
+export default `@state a = 5
+@state b = 3
+@computed sum = a + b
+@computed doubled = sum * 2`
+

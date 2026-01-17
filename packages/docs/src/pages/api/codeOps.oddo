@@ -1,0 +1,5 @@
+export default `=     Binding (declaration)      x = 10
+:=    Mutation (reassignment)    x := 20
++:=   Add and mutate             x +:= 5
+-:=   Subtract and mutate        x -:= 3`
+

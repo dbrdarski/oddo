@@ -1,0 +1,4 @@
+export default `<div>Hello</div>
+<Button />
+<MyComponent prop="value" />`
+

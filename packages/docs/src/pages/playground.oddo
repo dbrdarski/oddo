@@ -1,0 +1,270 @@
+import { e } from "@oddo/ui"
+import { highlightOddo } from "@oddo/lang"
+import { highlight as highlightJS } from "best-highlight"
+
+Playground = () => {
+  @state input = ""
+  @state output = "// Output will appear here..."
+  @state outputMode = "js"
+  @state hasError = false
+  @state parseTime = "--"
+  @state nodeCount = "--"
+  @state outputSize = "--"
+  @state lastAST = null
+  @state lastJS = null
+
+  // Mutations for state updates
+  @mutate updateInput = (value) => {
+    input := value
+  }
+
+  @mutate updateOutput = (value) => {
+    output := value
+  }
+
+  @mutate updateOutputMode = (value) => {
+    outputMode := value
+  }
+
+  @mutate updateHasError = (value) => {
+    hasError := value
+  }
+
+  @mutate updateParseTime = (value) => {
+    parseTime := value
+  }
+
+  @mutate updateNodeCount = (value) => {
+    nodeCount := value
+  }
+
+  @mutate updateOutputSize = (value) => {
+    outputSize := value
+  }
+
+  @mutate updateLastAST = (value) => {
+    lastAST := value
+  }
+
+  @mutate updateLastJS = (value) => {
+    lastJS := value
+  }
+
+  // Compile function
+  doCompile = () => {
+    code = input
+    code.trim() == "" ? showEmpty() : sendCompile(code)
+  }
+
+  showEmpty = () => {
+    outputEl = document.getElementById("output-area")
+    outputEl ? outputEl.textContent := "// No input" : null
+    updateHasError(false)
+    updateParseTime("--")
+    updateNodeCount("--")
+    updateOutputSize("--")
+  }
+
+  sendCompile = (code) => {
+    startTime = performance.now()
+    fetch("/compile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: code })
+    })
+    .then((res) => res.json())
+    .then((result) => handleResult(result, startTime))
+    .catch((err) => handleError(err.message))
+  }
+
+  handleResult = (result, startTime) => {
+    elapsed = Math.round(performance.now() - startTime)
+    result.error ? handleError(result.error) : handleSuccess(result, elapsed)
+  }
+
+  handleSuccess = (result, elapsed) => {
+    updateHasError(false)
+    updateLastAST(result.ast)
+    updateLastJS(result.js)
+    updateParseTime(elapsed + "ms")
+    updateNodeCount(countNodes(result.ast))
+    updateOutputSize(result.js.length + " B")
+    showOutput()
+  }
+
+  handleError = (msg) => {
+    updateHasError(true)
+    outputEl = document.getElementById("output-area")
+    outputEl ? outputEl.textContent := "// Error: " + msg : null
+    updateParseTime("error")
+    updateNodeCount("--")
+    updateOutputSize("--")
+  }
+
+  showOutput = () => {
+    mode = outputMode
+    outputEl = document.getElementById("output-area")
+    mode == "js" ? showJSOutput(outputEl) : showASTOutput(outputEl)
+  }
+
+  showJSOutput = (el) => {
+    el ? el.innerHTML := highlightJS(String(lastJS), "javascript") : null
+  }
+
+  showASTOutput = (el) => {
+    astStr = JSON.stringify(lastAST, null, 2)
+    el ? el.textContent := astStr : null
+  }
+
+  countNodes = (obj) => {
+    obj == null ? 0 : typeof obj != "object" ? 0 : Object.keys(obj).reduce((sum, k) => sum + countNodes(obj[k]), 1)
+  }
+
+  // Load example
+  loadExample = (name) => {
+    name == "" ? null : fetchExample(name)
+  }
+
+  fetchExample = (name) => {
+    fetch("/examples/" + name + ".oddo")
+    .then((res) => res.text())
+    .then((code) => {
+      updateInput(code)
+      syncHighlightFromCode(code)
+      document.getElementById("input-area").value := code
+      doCompile()
+    })
+  }
+
+  // Toggle output mode
+  toggleMode = (mode) => {
+    updateOutputMode(mode)
+    lastJS ? showOutput() : null
+  }
+
+  // Run in preview
+  runPreview = () => {
+    js = lastJS
+    js ? executePreview(js) : null
+  }
+
+  executePreview = (js) => {
+    frame = document.getElementById("preview-frame")
+    fetch("/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ js: js })
+    })
+    .then((res) => res.text())
+    .then((html) => {
+      frame.srcdoc := html
+    })
+  }
+
+  // Handle input changes with debounce
+  debounce = { timer: null }
+  handleInputEvent = (value) => {
+    updateInput(value)
+    syncHighlightFromCode(value)
+    debounce.timer ? clearTimeout(debounce.timer) : null
+    debounce.timer := setTimeout(doCompile, 300)
+  }
+
+  syncHighlightFromCode = (codeStr) => {
+    el = document.getElementById("highlight-layer")
+    el ? setInnerHTML(el, highlightOddo(String(codeStr)) + " ") : null
+  }
+
+  setInnerHTML = (element, html) => {
+    element.innerHTML := html
+  }
+
+  handleScrollEvent = (textarea) => {
+    highlight = document.getElementById("highlight-layer")
+    highlight ? syncScroll(highlight, textarea) : null
+  }
+
+  syncScroll = (highlight, textarea) => {
+    highlight.scrollTop := textarea.scrollTop
+    highlight.scrollLeft := textarea.scrollLeft
+  }
+
+  handleKeyDownEvent = (e) => {
+    (e.ctrlKey || e.metaKey) && e.key == "Enter" ? doRunPreview(e) : null
+  }
+
+  doRunPreview = (e) => {
+    e.preventDefault()
+    runPreview()
+  }
+
+  return <div class="playground-layout">
+    <div class="editor-row">
+      <div class="panel">
+        <div class="panel-header">
+          <h3>Input</h3>
+          <select onchange={(e) => { loadExample(e.target.value) }}>
+            <option value="">Load example...</option>
+            <option value="counter">Counter</option>
+            <option value="computed">Computed</option>
+            <option value="primitives">Primitives</option>
+            <option value="operators">Operators</option>
+            <option value="jsx">JSX</option>
+            <option value="modifiers">Modifiers</option>
+          </select>
+        </div>
+        <div class="panel-content">
+          <div class="editor-container">
+            <pre id="highlight-layer" class="editor-highlight"></pre>
+            <textarea
+              id="input-area"
+              class="editor-textarea"
+              oninput={(e) => { handleInputEvent(e.target.value) }}
+              onkeydown={(e) => { handleKeyDownEvent(e) }}
+              onscroll={(e) => { handleScrollEvent(e.target) }}
+              placeholder="// Write Oddo code here..."
+              spellcheck="false"
+            ></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <h3>Output</h3>
+          <div class="output-toggle">
+            <button
+              class={outputMode == "js" ? "active" : ""}
+              onclick={() => { toggleMode("js") }}
+            >JS</button>
+            <button
+              class={outputMode == "ast" ? "active" : ""}
+              onclick={() => { toggleMode("ast") }}
+            >AST</button>
+          </div>
+        </div>
+        <div class="panel-content">
+          <div id="output-area" class={hasError ? "output-area error" : "output-area"}>{output}</div>
+        </div>
+        <div class="stats-bar">
+          <span>Parse: {parseTime}</span>
+          <span>Nodes: {nodeCount}</span>
+          <span>Size: {outputSize}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview-section">
+      <div class="preview-header">
+        <h3>Preview</h3>
+        <button class="run-btn" onclick={runPreview}>Run</button>
+      </div>
+      <div class="preview-content">
+        <iframe id="preview-frame" sandbox="allow-scripts"></iframe>
+      </div>
+    </div>
+  </div>
+}
+
+export default Playground
+

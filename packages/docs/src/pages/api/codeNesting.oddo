@@ -1,0 +1,6 @@
+export default `<div>
+  <h1>Title</h1>
+  <p>Static text and dynamic content</p>
+  <List items={items} />
+</div>`
+

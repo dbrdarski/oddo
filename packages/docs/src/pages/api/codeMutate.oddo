@@ -1,0 +1,7 @@
+export default `@mutate increment = () => {
+  count := count + 1
+}
+@mutate updateUser = (name) => {
+  user.name := name
+}`
+

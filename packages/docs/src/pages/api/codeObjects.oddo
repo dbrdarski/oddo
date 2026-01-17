@@ -1,0 +1,5 @@
+export default `{ name: "Alice", age: 30 }
+{ x: 1, y: 2 }
+{ name }           // shorthand
+{ [key]: value }   // computed property`
+

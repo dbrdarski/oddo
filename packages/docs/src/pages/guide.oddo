@@ -1,0 +1,69 @@
+import { e } from "@oddo/ui"
+import { highlightOddo } from "@oddo/lang"
+import code1 from "./guide/code1"
+import code2 from "./guide/code2"
+import code3 from "./guide/code3"
+import code4 from "./guide/code4"
+import code5 from "./guide/code5"
+
+GuidePage = () => {
+  atSign = "@"
+
+  return <div class="doc-page">
+    <div class="doc-content">
+      <section class="doc-hero">
+        <h1>Welcome to Oddo</h1>
+        <p class="doc-lead">A functional reactive programing language.</p>
+      </section>
+
+      <section class="doc-section">
+        <h2>What is Oddo?</h2>
+        <p>Oddo is an experimental language intended for reactive programming. It is a JavaScript dialect that treats reactivity as a first-class language primitive and places a stronger emphasis on data immutability.</p>
+        <p>Oddo ships with its own UI rendering library for fine-grained reactivity and built-in JSX support.</p>
+      </section>
+
+      <section class="doc-section">
+        <h2>Key Differentiators</h2>
+
+        <div class="doc-feature">
+          <h3>Arrow Function Components</h3>
+          <p>Components are simple arrow functions. Reactive state and mutations are declared inline with modifiers.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code1) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>Mutation with :=</h3>
+          <p>Oddo distinguishes binding (=) from mutation (:=). This makes state changes explicit and predictable.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code2) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>Value decorators</h3>
+          <p>Reactive primitives use the {atSign} prefix for clarity. At a glance, you know what is reactive.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code3) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>JSX-First UI</h3>
+          <p>JSX is a first-class citizen. Build reactive interfaces naturally with familiar syntax.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code4) })}</pre>
+        </div>
+      </section>
+
+      <section class="doc-section">
+        <h2>Hello World</h2>
+        <p>Here is the simplest Oddo application:</p>
+        <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code5) })}</pre>
+        <p>That is it. No boilerplate, no configuration. Just write and run.</p>
+      </section>
+
+      <section class="doc-section">
+        <h2>Ready to Explore?</h2>
+        <p>Head to the <strong>API</strong> tab to learn about all the features, or jump into the <strong>Playground</strong> to start writing code immediately.</p>
+      </section>
+    </div>
+  </div>
+}
+
+export default GuidePage
+

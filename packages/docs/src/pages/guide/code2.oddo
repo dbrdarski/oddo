@@ -1,0 +1,5 @@
+export default `@mutable x = 10               // bind x to 10
+@mutate increment = () => {   // mutations are constranined to mutator functions
+  x := x + 1                  // mutate x to 11
+}`
+

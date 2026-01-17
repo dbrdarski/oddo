@@ -1,0 +1,5 @@
+export default `<div class="container">...</div>
+<input value={inputValue} />
+<button onclick={handleClick}>Click</button>
+<div {...props} />`
+

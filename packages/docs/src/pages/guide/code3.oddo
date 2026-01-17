@@ -1,0 +1,4 @@
+export default `@state name = "World"
+@computed greeting = "Hello, " + name + "!"
+@effect () => console.log(greeting)`
+

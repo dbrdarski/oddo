@@ -1,0 +1,131 @@
+import { e } from "@oddo/ui"
+import { highlightOddo } from "@oddo/lang"
+import codeState from "./api/codeState"
+import codeComputed from "./api/codeComputed"
+import codeEffect from "./api/codeEffect"
+import codeMutate from "./api/codeMutate"
+import codeOps from "./api/codeOps"
+import codeEquality from "./api/codeEquality"
+import codeAllOps from "./api/codeAllOps"
+import codePrimitives from "./api/codePrimitives"
+import codeArrays from "./api/codeArrays"
+import codeObjects from "./api/codeObjects"
+import codeArrows from "./api/codeArrows"
+import codeElements from "./api/codeElements"
+import codeAttrs from "./api/codeAttrs"
+import codeNesting from "./api/codeNesting"
+import codeBlock from "./api/codeBlock"
+
+APIPage = () => {
+  atSign = "@"
+
+  return <div class="doc-page">
+    <div class="doc-content">
+      <section class="doc-hero">
+        <h1>API Reference</h1>
+        <p class="doc-lead">Complete documentation of Oddo reactive primitives, operators, and syntax.</p>
+      </section>
+
+      <section class="doc-section">
+        <h2>Reactive Primitives</h2>
+
+        <div class="doc-feature">
+          <h3>{atSign}state</h3>
+          <p>Declares reactive state. When state changes, dependent UI automatically updates.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeState) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>{atSign}computed</h3>
+          <p>Derives values from state. Automatically recalculates when dependencies change.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeComputed) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>{atSign}effect</h3>
+          <p>Runs side effects when dependencies change. Perfect for logging, API calls, or DOM manipulation.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeEffect) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>{atSign}mutate</h3>
+          <p>Defines mutation functions that can safely modify state. Enables batched updates.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeMutate) })}</pre>
+        </div>
+      </section>
+
+      <section class="doc-section">
+        <h2>Operators</h2>
+
+        <div class="doc-feature">
+          <h3>Assignment vs Mutation</h3>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeOps) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>Equality</h3>
+          <p>Oddo simplifies equality: == always compiles to JavaScript === (strict equality). No type coercion surprises.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeEquality) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>All Standard Operators</h3>
+          <p>Arithmetic, logical, comparison, and bitwise operators work as expected.</p>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeAllOps) })}</pre>
+        </div>
+      </section>
+
+      <section class="doc-section">
+        <h2>Data Types</h2>
+
+        <div class="doc-feature">
+          <h3>Primitives</h3>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codePrimitives) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>Arrays</h3>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeArrays) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>Objects</h3>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeObjects) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>Arrow Functions</h3>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeArrows) })}</pre>
+        </div>
+      </section>
+
+      <section class="doc-section">
+        <h2>JSX Syntax</h2>
+
+        <div class="doc-feature">
+          <h3>Elements and Components</h3>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeElements) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>Attributes and Expressions</h3>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeAttrs) })}</pre>
+        </div>
+
+        <div class="doc-feature">
+          <h3>Children and Nesting</h3>
+          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeNesting) })}</pre>
+        </div>
+      </section>
+
+      <section class="doc-section">
+        <h2>Component Structure</h2>
+        <p>Components are arrow functions with curly braces. State, mutations, and the return statement go inside:</p>
+        <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(codeBlock) })}</pre>
+      </section>
+    </div>
+  </div>
+}
+
+export default APIPage
+

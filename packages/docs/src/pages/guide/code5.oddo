@@ -1,0 +1,6 @@
+export default `import { mount } from "@oddo/ui"
+
+App = () => <h1>Hello, Oddo!</h1>
+
+mount(document.body, <App />)`
+

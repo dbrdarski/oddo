@@ -1,0 +1,6 @@
+export default `<div class="card">
+  <h2>{title}</h2>
+  <p>Dynamic content: {value}</p>
+  <Button onclick={handler}>Click</Button>
+</div>`
+

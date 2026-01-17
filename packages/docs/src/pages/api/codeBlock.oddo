@@ -1,0 +1,12 @@
+export default `Component = () => {
+  @state value = 0
+
+  @mutate setValue = (v) => {
+    value := v
+  }
+
+  return <div onclick={() => { setValue(10) }}>
+    Value: {value}
+  </div>
+}`
+
