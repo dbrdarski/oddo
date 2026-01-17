@@ -1,6 +1,6 @@
 {
   "name": "@oddo/lang",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "type": "module",
   "description": "Oddo Language Package",
   "main": "./dist/index.js",
@@ -23,6 +23,24 @@
     "parser",
     "oddo"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "author": "dbrdarski <dane.brdarski@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dbrdarski/oddo.git",
+    "directory": "packages/lang"
+  },
+  "homepage": "https://github.com/dbrdarski/oddo#readme",
+  "bugs": {
+    "url": "https://github.com/dbrdarski/oddo/issues"
+  },
+  "dependencies": {
+    "chevrotain": "^11.0.3"
+  },
+  "peerDependencies": {
+    "@babel/generator": "^7.0.0",
+    "@babel/traverse": "^7.0.0",
+    "@babel/types": "^7.0.0"
+  }
 }
 

@@ -1,17 +1,39 @@
 {
   "name": "@oddo/docs",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "type": "module",
-  "description": "Documentation for the Oddo framework",
-  "private": true,
+  "description": "Documentation and examples for the Oddo framework",
   "scripts": {
     "build": "node build.mjs",
     "serve": "node server.mjs",
     "dev": "npm run build && npm run serve"
   },
+  "files": [
+    "dist",
+    "src",
+    "public",
+    "build.mjs",
+    "server.mjs"
+  ],
   "keywords": [
     "documentation",
-    "oddo"
+    "oddo",
+    "examples"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "author": "dbrdarski <dane.brdarski@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dbrdarski/oddo.git",
+    "directory": "packages/docs"
+  },
+  "homepage": "https://github.com/dbrdarski/oddo#readme",
+  "bugs": {
+    "url": "https://github.com/dbrdarski/oddo/issues"
+  },
+  "dependencies": {
+    "@oddo/lang": "^0.0.1",
+    "@oddo/ui": "^0.0.1",
+    "esbuild": "^0.27.2"
+  }
 }

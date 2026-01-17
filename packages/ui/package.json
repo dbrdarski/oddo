@@ -1,6 +1,6 @@
 {
   "name": "@oddo/ui",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "type": "module",
   "description": "Oddo UI Framework",
   "main": "./dist/index.js",
@@ -21,8 +21,19 @@
   "keywords": [
     "ui",
     "framework",
-    "oddo"
+    "oddo",
+    "reactive"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "author": "dbrdarski <dane.brdarski@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dbrdarski/oddo.git",
+    "directory": "packages/ui"
+  },
+  "homepage": "https://github.com/dbrdarski/oddo#readme",
+  "bugs": {
+    "url": "https://github.com/dbrdarski/oddo/issues"
+  }
 }
 
