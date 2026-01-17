@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Oddo Playground Server
- * 
+ *
  * Serves the playground and handles compilation requests.
  */
 
@@ -62,13 +62,13 @@ const server = http.createServer(async (req, res) => {
     req.on('end', () => {
       try {
         const { code } = JSON.parse(body)
-        
+
         // Parse to AST
         const ast = parseOddo(code)
-        
+
         // Compile to JS
         const js = compileOddoToJS(code, { runtimeLibrary: '@oddo/ui' })
-        
+
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ ast, js }))
       } catch (err) {
@@ -78,7 +78,7 @@ const server = http.createServer(async (req, res) => {
     })
     return
   }
-  
+
   // Preview endpoint - compiles and bundles user code
   if (url.pathname === '/preview' && req.method === 'POST') {
     let body = ''
@@ -86,7 +86,7 @@ const server = http.createServer(async (req, res) => {
     req.on('end', async () => {
       try {
         const { js } = JSON.parse(body)
-        
+
         // Bundle the compiled JS with esbuild (resolving @oddo/ui)
         const result = await esbuild.build({
           stdin: {
@@ -105,9 +105,9 @@ const server = http.createServer(async (req, res) => {
           },
           logLevel: 'silent'
         })
-        
+
         const bundledCode = result.outputFiles[0].text
-        
+
         // Build preview HTML
         const html = `<!DOCTYPE html>
 <html><head><style>body{margin:0;font-family:system-ui,sans-serif;}</style></head>
@@ -120,7 +120,7 @@ ${bundledCode}
 }
 </script>
 </body></html>`
-        
+
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end(html)
       } catch (err) {
@@ -133,7 +133,7 @@ ${bundledCode}
 
   // Static file serving
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname
-  
+
   // Handle package requests
   if (filePath.startsWith('/packages/')) {
     const fullPath = path.join(PACKAGES_DIR, filePath.replace('/packages/', ''))
@@ -161,7 +161,7 @@ function serveFile(res, filePath) {
       return
     }
 
-    res.writeHead(200, { 
+    res.writeHead(200, {
       'Content-Type': contentType,
       'Cache-Control': 'no-cache'
     })
@@ -171,14 +171,14 @@ function serveFile(res, filePath) {
 
 async function start() {
   await loadCompiler()
-  
+
   server.listen(PORT, () => {
     console.log(`
 ╔══════════════════════════════════════════════════╗
 ║                                                  ║
 ║   ⚡ Oddo Playground                             ║
 ║                                                  ║
-║   http://localhost:${PORT}                        ║
+║   http://localhost:${PORT}                          ║
 ║                                                  ║
 ║   Ctrl+C to stop                                 ║
 ║                                                  ║

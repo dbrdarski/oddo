@@ -12,15 +12,10 @@
     "build:ui": "npm run build --workspace=@oddo/ui",
     "build:lang": "npm run build --workspace=@oddo/lang",
     "build:docs": "npm run build --workspace=@oddo/docs",
-    "playground": "node examples/server.mjs",
     "dev": "npm run build:ui && npm run playground",
     "docs:serve": "node packages/docs/server.mjs",
     "docs:dev": "npm run build:docs && npm run docs:serve",
-    "demo:lang": "nodemon packages/lang/src/web-demo.mjs",
-    "demo:build": "node demo/build.mjs",
-    "demo:serve": "node demo/server.mjs",
-    "demo:watch": "node demo/build.mjs --watch",
-    "demo": "npm run demo:build && npm run demo:serve"
+    "demo:lang": "nodemon packages/lang/src/web-demo.mjs"
   },
   "dependencies": {
     "chevrotain": "^11.0.3",
