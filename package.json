@@ -12,6 +12,7 @@
     "build:ui": "npm run build --workspace=@oddo/ui",
     "build:lang": "npm run build --workspace=@oddo/lang",
     "build:docs": "npm run build --workspace=@oddo/docs",
+    "build:router": "npm run build --workspace=@oddo/router",
     "dev": "npm run build:ui && npm run playground",
     "docs:serve": "node packages/docs/server.mjs",
     "docs:dev": "npm run build:docs && npm run docs:serve",

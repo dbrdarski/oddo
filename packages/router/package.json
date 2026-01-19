@@ -1,0 +1,42 @@
+{
+  "name": "@oddo/router",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Oddo Router",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup"
+  },
+  "keywords": [
+    "router",
+    "routing",
+    "oddo",
+    "spa"
+  ],
+  "license": "MIT",
+  "author": "dbrdarski <dane.brdarski@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dbrdarski/oddo.git",
+    "directory": "packages/router"
+  },
+  "homepage": "https://github.com/dbrdarski/oddo#readme",
+  "bugs": {
+    "url": "https://github.com/dbrdarski/oddo/issues"
+  },
+  "dependencies": {
+    "url-router": "^13.0.0"
+  }
+}
+
