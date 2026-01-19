@@ -2,39 +2,41 @@
 // Written in Oddo, compiled to JS
 
 import { mount, e } from "@oddo/ui"
+import { Router, navigation } from "@oddo/router"
 import GuidePage from "./pages/guide"
 import APIPage from "./pages/api"
 import Playground from "./pages/playground"
 
 // Main App Component
 App = () => {
-  @state currentPage = "guide"
-
-  @mutate setPage = (page) => {
-    currentPage := page
-  }
-
   return <div class="layout">
     <header>
       <div class="logo">&lt;oddo/&gt;</div>
       <div class="divider"></div>
       <nav class="nav-tabs">
         <button
-          class={currentPage == "guide" ? "nav-tab active" : "nav-tab"}
-          onclick={() => { setPage("guide") }}
+          class="nav-tab"
+          onclick={() => { navigation.push("/") }}
         >Guide</button>
         <button
-          class={currentPage == "api" ? "nav-tab active" : "nav-tab"}
-          onclick={() => { setPage("api") }}
+          class="nav-tab"
+          onclick={() => { navigation.push("/api") }}
         >API</button>
         <button
-          class={currentPage == "playground" ? "nav-tab active" : "nav-tab"}
-          onclick={() => { setPage("playground") }}
+          class="nav-tab"
+          onclick={() => { navigation.push("/playground") }}
         >Playground</button>
       </nav>
     </header>
     <main class="main-content">
-      {currentPage == "guide" ? <GuidePage /> : currentPage == "api" ? <APIPage /> : <Playground />}
+      <Router 
+        routes={{ 
+          "/": <GuidePage />, 
+          "/api": <APIPage />, 
+          "/playground": <Playground />,
+          "(.*)": "Not found"
+        }} 
+      />
     </main>
   </div>
 }

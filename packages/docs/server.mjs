@@ -142,16 +142,33 @@ ${bundledCode}
 
   // Serve from dist dir
   const fullPath = path.join(DIST_DIR, filePath)
-  serveFile(res, fullPath)
+  serveFile(res, fullPath, true)
 })
 
-function serveFile(res, filePath) {
+function serveFile(res, filePath, spaFallback = false) {
   const extname = path.extname(filePath).toLowerCase()
   const contentType = MIME_TYPES[extname] || 'application/octet-stream'
 
   fs.readFile(filePath, (err, content) => {
     if (err) {
       if (err.code === 'ENOENT') {
+        // For SPA routes (no extension or html), serve index.html
+        if (spaFallback && (!extname || extname === '.html')) {
+          const indexPath = path.join(DIST_DIR, 'index.html')
+          fs.readFile(indexPath, (indexErr, indexContent) => {
+            if (indexErr) {
+              res.writeHead(500, { 'Content-Type': 'text/plain' })
+              res.end('Server Error')
+              return
+            }
+            res.writeHead(200, {
+              'Content-Type': 'text/html',
+              'Cache-Control': 'no-cache'
+            })
+            res.end(indexContent)
+          })
+          return
+        }
         res.writeHead(404, { 'Content-Type': 'text/plain' })
         res.end('Not Found')
       } else {
