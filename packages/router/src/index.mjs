@@ -14,7 +14,7 @@ export const Router = ({ props: { routes }}) => {
     const initialRoute = router.find(url)
     const [currentRoute, setCurrentRoute] = state(initialRoute)
     
-    window.history.replaceState({ href: url }, "", url) // not sure if this is needed
+    window.history.replaceState({ href: url }, "", url)
 
     navigate = (href) => {
         const route = router.find(href)
@@ -25,7 +25,7 @@ export const Router = ({ props: { routes }}) => {
         if (event.state?.href) {
             navigate(event.state.href)
         }
-    });
+    })
     
     return createJsxExpression(currentRoute => currentRoute()?.handler, [currentRoute])
 }
