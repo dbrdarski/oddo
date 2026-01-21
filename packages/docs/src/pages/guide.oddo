@@ -5,6 +5,7 @@ import code2 from "./guide/code2"
 import code3 from "./guide/code3"
 import code4 from "./guide/code4"
 import code5 from "./guide/code5"
+import { A } from "@oddo/router"
 
 GuidePage = () => {
   atSign = "@"
@@ -59,11 +60,10 @@ GuidePage = () => {
 
       <section class="doc-section">
         <h2>Ready to Explore?</h2>
-        <p>Head to the <strong>API</strong> tab to learn about all the features, or jump into the <strong>Playground</strong> to start writing code immediately.</p>
+        <p>Head to the <A href="/api">API</A> tab to learn about all the features, or jump into the <A href="/playground">Playground</A> to start writing code immediately.</p>
       </section>
     </div>
   </div>
 }
 
 export default GuidePage
-

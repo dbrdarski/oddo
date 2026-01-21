@@ -13,7 +13,7 @@ export const Router = ({ props: { routes }}) => {
     const url = window.location.pathname + window.location.search
     const initialRoute = router.find(url)
     const [currentRoute, setCurrentRoute] = state(initialRoute)
-    
+
     window.history.replaceState({ href: url }, "", url)
 
     navigate = (href) => {
@@ -26,7 +26,7 @@ export const Router = ({ props: { routes }}) => {
             navigate(event.state.href)
         }
     })
-    
+
     return createJsxExpression(currentRoute => currentRoute()?.handler, [currentRoute])
 }
 
@@ -45,12 +45,11 @@ export const navigation = Object.freeze({
     replace
 })
 
-export const A = (props, ...children) => createElement("a", computed((props) => ({ 
-    ...props,
+export const A = ({ props, children }) => createElement("a", computed((props) => ({
+    ...props(),
     onclick: (e) => {
         e.preventDefault()
-        props.onclick?.(e)
-        push(props.href)
+        props().onclick?.(e)
+        push(props().href)
     }
 }), [props]), ...children)
-
