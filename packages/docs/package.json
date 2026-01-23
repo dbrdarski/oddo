@@ -1,6 +1,6 @@
 {
   "name": "@oddo/docs",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "type": "module",
   "description": "Documentation and examples for the Oddo framework",
   "scripts": {

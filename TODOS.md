@@ -24,3 +24,7 @@
 - Error Boundry
 - Suspense
 - ...
+
+
+- atts-minus => "attrs-minus": 
+- remove trimming on JSX text

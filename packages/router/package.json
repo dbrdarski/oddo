@@ -1,6 +1,6 @@
 {
   "name": "@oddo/router",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "type": "module",
   "description": "Oddo Router",
   "main": "./dist/index.js",
@@ -39,7 +39,7 @@
     "url-router": "^13.0.0"
   },
   "peerDependencies": {
-    "@oddo/ui": ">=0.0.1"
+    "@oddo/ui": ">=0.0.3"
   }
 }
 

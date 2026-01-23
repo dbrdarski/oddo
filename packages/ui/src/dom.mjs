@@ -55,7 +55,7 @@ export const createFragment = (...children) => (parent, oldNodeCleanup) => {
 export const createElement = (tag, attrs, ...children) => (parent, oldNodeCleanup) => {
   const node = document.createElement(tag)
   attrs?.[reactiveSymbol]
-    ? effect2((attrs) => attrs = patchAttributes(node, attrs()), [attrs])
+    ? effect2((attrs) => patchAttributes(node, attrs()), [attrs])
     : patchAttributes(node, attrs)
 
   for (const child of children) {
