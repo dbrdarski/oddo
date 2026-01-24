@@ -1,7 +1,7 @@
 // Oddo Language Demo
 // Written in Oddo, compiled to JS
 
-import { mount, e } from "@oddo/ui"
+import { e } from "@oddo/ui"
 import { Router, navigation } from "@oddo/router"
 import GuidePage from "./pages/guide"
 import APIPage from "./pages/api"
@@ -41,5 +41,4 @@ App = () => {
   </div>
 }
 
-// Mount the app
-mount(document.getElementById("app"), <App />)
+export default App

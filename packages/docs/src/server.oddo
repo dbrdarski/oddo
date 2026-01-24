@@ -1,0 +1,8 @@
+// SSR entry point
+import { render } from "@oddo/ui"
+import { withSSR } from "@oddo/router"
+import App from "./app"
+
+// Export render function that accepts a path
+export default withSSR(() => render(<App />))
+
