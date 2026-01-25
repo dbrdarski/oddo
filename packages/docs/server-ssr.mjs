@@ -14,7 +14,7 @@ import * as esbuild from 'esbuild'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const PORT = process.env.PORT || 3033
+const PORT = process.env.PORT || 3000
 const SRC_DIR = path.join(__dirname, 'src')
 const PUBLIC_DIR = path.join(__dirname, 'public')
 const DIST_SSR_DIR = path.join(__dirname, 'dist-ssr')
