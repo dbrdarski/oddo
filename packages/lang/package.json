@@ -1,6 +1,6 @@
 {
   "name": "@oddo/lang",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "description": "Oddo Language Package",
   "main": "./dist/index.js",
@@ -43,4 +43,3 @@
     "@babel/types": "^7.0.0"
   }
 }
-
