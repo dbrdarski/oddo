@@ -253,7 +253,7 @@ test('Modifier on return', () => {
 test('State modifier transformation', () => {
   const js = compileOddoToJS('@state x = 3');
   assert(/import \{ state as \w+ \} from "@oddo\/ui"/.test(js), 'Should import state with alias');
-  assert(/const x = \w+\(3\)/.test(js), 'Should call state function');
+  assert(/const \[x, \w+\] = \w+\(3\)/.test(js), 'Should destructure state into [getter, setter]');
 });
 
 test('Unknown modifier throws error', () => {
@@ -269,14 +269,14 @@ test('Multiple state modifiers only import once', () => {
   const js = compileOddoToJS('@state x = 3\n@state y = 5');
   const importCount = (js.match(/import \{/g) || []).length;
   assert(importCount === 1, 'Should only have one import statement');
-  assert(/const x = \w+\(3\)/.test(js), 'Should have first state call');
-  assert(/const y = \w+\(5\)/.test(js), 'Should have second state call');
+  assert(/const \[x, \w+\] = \w+\(3\)/.test(js), 'Should have first state call');
+  assert(/const \[y, \w+\] = \w+\(5\)/.test(js), 'Should have second state call');
 });
 
 test('Custom runtime library configuration', () => {
   const js = compileOddoToJS('@state x = 3', { runtimeLibrary: 'my-custom-lib' });
   assert(/import \{ state as \w+ \} from "my-custom-lib"/.test(js), 'Should import from custom library');
-  assert(/const x = \w+\(3\)/.test(js), 'Should call state function');
+  assert(/const \[x, \w+\] = \w+\(3\)/.test(js), 'Should destructure state into [getter, setter]');
 });
 
 test('Computed modifier extracts identifiers', () => {
@@ -294,9 +294,10 @@ test('React modifier extracts identifiers', () => {
 });
 
 test('Mutate modifier with arrow function', () => {
-  const js = compileOddoToJS('@mutate addPerson = (x) => x + 1');
-  assert(/import \{ mutate as \w+ \} from "@oddo\/ui"/.test(js), 'Should import mutate');
-  assert(/const addPerson = \w+\(/.test(js), 'Should call mutate function');
+  // @mutate requires := assignments inside the function body
+  const js = compileOddoToJS('@state count = 0\n@mutate increment = () => { count := count + 1 }');
+  assert(/import \{ .* mutate as \w+.* \} from "@oddo\/ui"/.test(js), 'Should import mutate');
+  assert(/const increment = \w+\(/.test(js), 'Should call mutate function');
 });
 
 test('Mutate modifier without function throws error', () => {
@@ -310,8 +311,8 @@ test('Mutate modifier without function throws error', () => {
 
 test('State modifier block applies to each statement', () => {
   const js = compileOddoToJS('@state: {\n  x = 3\n  y = 4\n}');
-  assert(/const x = \w+\(3\)/.test(js), 'Should have first state declaration');
-  assert(/const y = \w+\(4\)/.test(js), 'Should have second state declaration');
+  assert(/const \[x, \w+\] = \w+\(3\)/.test(js), 'Should have first state declaration');
+  assert(/const \[y, \w+\] = \w+\(4\)/.test(js), 'Should have second state declaration');
   // Should not be wrapped in IIFE
   assert(!js.includes('(() =>'), 'Should not wrap in IIFE');
 });
@@ -329,9 +330,10 @@ test('React modifier block applies to each statement', () => {
 });
 
 test('Mutate modifier block applies to each statement', () => {
-  const js = compileOddoToJS('@mutate: {\n  add = (x) => x + 1\n  sub = (x) => x - 1\n}');
-  assert(/const add = \w+\(/.test(js), 'Should have first mutate declaration');
-  assert(/const sub = \w+\(/.test(js), 'Should have second mutate declaration');
+  // @mutate requires := assignments inside function bodies
+  const js = compileOddoToJS('@state count = 0\n@mutate: {\n  inc = () => { count := count + 1 }\n  dec = () => { count := count - 1 }\n}');
+  assert(/const inc = \w+\(/.test(js), 'Should have first mutate declaration');
+  assert(/const dec = \w+\(/.test(js), 'Should have second mutate declaration');
 });
 
 // Syntax validation

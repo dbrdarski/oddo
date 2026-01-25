@@ -10,6 +10,11 @@ import * as t from '@babel/types';
 const generate = _generate.default || _generate;
 const traverse = _traverse.default || _traverse;
 
+// Helper function to check if a string is a valid JavaScript identifier
+function isValidJSIdentifier(name) {
+  return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name);
+}
+
 // Helper function to extract identifiers from a Babel AST expression
 function extractIdentifiers(babelNode) {
   const identifiers = new Set();
@@ -997,10 +1002,19 @@ function convertExpressionStatement(stmt) {
           // If it's a declaration (=) or assignment (:=), extract both left and right sides
           if (blockStmt.expression.type === 'variableDeclaration' || blockStmt.expression.type === 'assignment') {
             leftExpr = convertExpression(blockStmt.expression.left);
-            valueExpr = convertExpression(blockStmt.expression.right);
+            // For mutate/effect, pass raw Oddo AST (they need to analyze function body)
+            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect') {
+              valueExpr = blockStmt.expression.right;  // Oddo AST
+            } else {
+              valueExpr = convertExpression(blockStmt.expression.right);  // Babel AST
+            }
           } else {
             // Otherwise, use the expression itself as the value
-            valueExpr = convertExpression(blockStmt.expression);
+            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect') {
+              valueExpr = blockStmt.expression;  // Oddo AST
+            } else {
+              valueExpr = convertExpression(blockStmt.expression);  // Babel AST
+            }
           }
 
           // Apply the modifier transformation
@@ -1762,7 +1776,10 @@ function convertJSXElement(expr) {
       if (attr.type === 'jsxSpread') {
         properties.push(t.spreadElement(convertExpression(attr.expression)));
       } else {
-        const key = t.identifier(attr.name);
+        // Use string literal for keys with dashes or other non-identifier chars
+        const key = isValidJSIdentifier(attr.name)
+          ? t.identifier(attr.name)
+          : t.stringLiteral(attr.name);
         let value;
         if (attr.value === null) {
           value = t.booleanLiteral(true);
@@ -1787,7 +1804,10 @@ function convertJSXElement(expr) {
     const properties = [];
 
     for (const attr of expr.attributes) {
-      const key = t.identifier(attr.name);
+      // Use string literal for keys with dashes or other non-identifier chars
+      const key = isValidJSIdentifier(attr.name)
+        ? t.identifier(attr.name)
+        : t.stringLiteral(attr.name);
       let value;
 
       if (attr.value === null) {

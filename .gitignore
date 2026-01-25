@@ -3,6 +3,7 @@ node_modules/
 
 # Build outputs
 dist/
+**/dist-ssr/
 *.tsbuildinfo
 
 # Logs
@@ -30,4 +31,3 @@ coverage/
 
 # Misc
 *.log
-

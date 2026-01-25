@@ -5,15 +5,15 @@
 - add lift to consts (escape reactive) (ok)
 - fix mutate arguments (need to be lifted!) (ok)
 - implement @callback (or with different name) modifier (not needed)
-- implement ref attrs
-- implement router
+- implement ref attrs (ok)
+- implement router (ok - initial)
 - implement stores 
 
-- add coloriser (for web (ok), for VS code, for Zed)
+- add syntax highlighting (for web (ok), for VS code (not yet), for Zed (not yet))
 - add AI library to explain how to use the language properly to AI agents
 
-- implement SSR
-- implement hydration
+- implement SSR (ok)
+- implement hydration (ok)
 - performance tests for the framework
 - performance tests for the language parser
 
@@ -27,4 +27,4 @@
 
 
 - atts-minus => "attrs-minus": 
-- remove trimming on JSX text
+- remove trimming on JSX text (ok)

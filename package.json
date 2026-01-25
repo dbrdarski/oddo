@@ -14,7 +14,7 @@
     "build:docs": "npm run build --workspace=@oddo/docs",
     "build:router": "npm run build --workspace=@oddo/router",
     "dev": "npm run build:ui && npm run playground",
-    "docs:serve": "node packages/docs/server.mjs",
+    "docs:serve": "node packages/docs/server-ssr.mjs",
     "docs:dev": "npm run build:docs && npm run docs:serve",
     "demo:lang": "nodemon packages/lang/src/web-demo.mjs"
   },
