@@ -542,6 +542,15 @@ const MODIFIER_TRANSFORMATIONS = {
       const params = identifiers.map(id => t.identifier(id));
       const deps = identifiers.map(id => t.identifier(id));
 
+      // BEFORE converting body: mark effect dependencies as non-reactive in scope
+      // This prevents the body conversion from wrapping them with _lift
+      // They will be called with () by wrapDependenciesWithCalls after conversion
+      const savedScope = currentScope;
+      currentScope = Object.create(currentScope);
+      for (const id of identifiers) {
+        currentScope[id] = { type: 'param', reactive: false };
+      }
+
       // Convert the body from Oddo AST to Babel AST
       let convertedBody;
       if (oddoExpr.body && oddoExpr.body.type === 'blockStatement') {
@@ -555,6 +564,9 @@ const MODIFIER_TRANSFORMATIONS = {
       } else {
         convertedBody = t.blockStatement([]);
       }
+
+      // Restore parent scope
+      currentScope = savedScope;
 
       // Create new arrow function with dependencies as params
       const arrowFunc = t.arrowFunctionExpression(params, convertedBody);
@@ -632,6 +644,45 @@ function getVarType(name) {
   return currentScope[name]?.type;
 }
 
+// Extract all bound variable names from a destructuring pattern (Oddo AST)
+// Handles objectPattern, arrayPattern, and nested patterns
+function extractBoundNames(pattern, names = []) {
+  if (!pattern) return names;
+
+  if (pattern.type === 'identifier') {
+    names.push(pattern.name);
+  } else if (pattern.type === 'objectPattern') {
+    for (const prop of pattern.properties || []) {
+      if (prop.type === 'property') {
+        // The bound name is in the value (which could be an identifier or nested pattern)
+        extractBoundNames(prop.value, names);
+      } else if (prop.type === 'restProperty') {
+        // Rest property: { ...rest } -> rest is the bound name
+        if (prop.argument?.type === 'identifier') {
+          names.push(prop.argument.name);
+        }
+      }
+    }
+  } else if (pattern.type === 'arrayPattern') {
+    for (const element of pattern.elements || []) {
+      if (!element) continue; // Handle holes in array patterns
+      if (element.type === 'identifier') {
+        names.push(element.name);
+      } else if (element.type === 'restElement') {
+        // Rest element: [...rest] -> rest is the bound name
+        if (element.argument?.type === 'identifier') {
+          names.push(element.argument.name);
+        }
+      } else {
+        // Nested pattern
+        extractBoundNames(element, names);
+      }
+    }
+  }
+
+  return names;
+}
+
 // UID generator that avoids collisions (available during conversion)
 function generateUniqueId(baseName) {
   let candidate = baseName;
@@ -689,7 +740,17 @@ function collectOddoIdentifiers(node, names = new Set()) {
     if (node.parameters) {
       for (const param of node.parameters) {
         if (param.name) {
+          // Simple parameter: (x) => ...
           declareVariable(param.name, 'param');
+        } else if (param.type === 'destructuringPattern') {
+          // Destructuring parameter: ({ x, y }) => ... or ([a, b]) => ...
+          const boundNames = extractBoundNames(param.pattern);
+          for (const name of boundNames) {
+            declareVariable(name, 'param');
+          }
+        } else if (param.type === 'restElement' && param.argument?.name) {
+          // Rest parameter: (...args) => ...
+          declareVariable(param.argument.name, 'param');
         }
       }
     }
@@ -1662,9 +1723,9 @@ function convertObjectPattern(expr) {
  */
 function convertJSXChild(child) {
   if (child.type === 'jsxText') {
-    // Trim and skip whitespace-only text
+    // Keep all text including whitespace (whitespace is now intentionally preserved in AST)
     const text = child.value;
-    if (!text.trim()) return null;
+    if (!text) return null;  // Only skip truly empty strings
     return t.stringLiteral(text);
   } else if (child.type === 'jsxExpression') {
     // JSX expression: {expr} -> _x((deps) => expr(), [deps])

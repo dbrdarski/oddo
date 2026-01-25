@@ -1,55 +1,66 @@
 // @oddo/router - Client-side router for Oddo applications
+// This is the initial basic implementation or router. It doesn't even support nested routes.
+
 import * as urlRouterModule from "url-router"
 import { createElement, createJsxExpression, computed, state, lift } from "@oddo/ui"
 
 const UrlRouter = urlRouterModule.default || urlRouterModule
 
-// The first implementation is a very simple router that doesn't even support nested routes.
+let ssrPath = null
+export const withSSR = (app) => (path) => {
+  ssrPath = path
+  const result = app()
+  ssrPath = null
+  return result
+}
 
 let navigate = null
 
 export const Router = ({ props: { routes }}) => {
-    const router = new UrlRouter(lift((routes) => routes(), [routes]))
-    const url = window.location.pathname + window.location.search
-    const initialRoute = router.find(url)
-    const [currentRoute, setCurrentRoute] = state(initialRoute)
+  const router = new UrlRouter(lift((routes) => routes(), [routes]))
+  const isSSR = typeof window === "undefined"
+  const url = isSSR ? ssrPath : window.location.pathname + window.location.search
+  const initialRoute = router.find(url)
+  const [currentRoute, setCurrentRoute] = state(initialRoute)
 
+  if (!isSSR) {
     window.history.replaceState({ href: url }, "", url)
 
     navigate = (href) => {
-        const route = router.find(href)
-        setCurrentRoute(route)
+      const route = router.find(href)
+      setCurrentRoute(route)
     }
 
     window.addEventListener('popstate', (event) => {
-        if (event.state?.href) {
-            navigate(event.state.href)
-        }
+      if (event.state?.href) {
+        navigate(event.state.href)
+      }
     })
+  }
 
-    return createJsxExpression(currentRoute => currentRoute()?.handler, [currentRoute])
+  return createJsxExpression(currentRoute => currentRoute()?.handler, [currentRoute])
 }
 
 const push = (href) => {
-    navigate(href)
-    window.history.pushState({ href }, "", href)
+  navigate(href)
+  window.history.pushState({ href }, "", href)
 }
 
 const replace = (href) => {
-    navigate(href)
-    window.history.replaceState({ href }, "", href)
+  navigate(href)
+  window.history.replaceState({ href }, "", href)
 }
 
 export const navigation = Object.freeze({
-    push,
-    replace
+  push,
+  replace
 })
 
 export const A = ({ props, children }) => createElement("a", computed((props) => ({
-    ...props(),
-    onclick: (e) => {
-        e.preventDefault()
-        props().onclick?.(e)
-        push(props().href)
-    }
+  ...props(),
+  onclick: (e) => {
+    e.preventDefault()
+    props().onclick?.(e)
+    push(props().href)
+  }
 }), [props]), ...children)

@@ -18,6 +18,10 @@ export const observable = (observers = new Set) => ({
   }
 })
 
+// export const ref = (value) =>
+//   new ReactiveContainer((...args) => args.length ? void (value = args[0]) : value)
+export const ref = (value) => (...args) => args.length ? void (value = args[0]) : value
+
 export const state = (state) => {
   const { subscribe, notify } = observable()
   return [
@@ -50,10 +54,10 @@ export const effect = (fn, deps) => {
   effect()
 }
 
-export const effect2 = (fn, deps) => {
+export const effect2 = (fn, deps, run = true) => {
   const effect = () => fn(...deps)
   deps = bindDependencies(deps, schedule.bind(null, effect))
-  effect()
+  run && effect()
 }
 
 const queue = []

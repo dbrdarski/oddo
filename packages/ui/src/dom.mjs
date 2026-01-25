@@ -34,14 +34,14 @@ export const createJsxExpression = (fn, deps) => (parent) => {
 
 export const createFragment = (...children) => (parent, oldNodeCleanup) => {
   const node = new DocumentFragment
-  const startNode = document.createComment("<")
-  const endNode = document.createComment(">")
-  node.appendChild(startNode)
+  const startNode = hydrating ? walk() : document.createComment("<")
+  hydrating || node.appendChild(startNode)
   for (const child of children) {
     render(child)(node)
   }
-  node.appendChild(endNode)
-  oldNodeCleanup ? oldNodeCleanup(parent, node) : parent.appendChild(node)
+  const endNode = hydrating ? walk() : document.createComment(">")
+  hydrating || node.appendChild(endNode)
+  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
 
   return (parent, newElement) => {
     const range = document.createRange()
@@ -53,15 +53,17 @@ export const createFragment = (...children) => (parent, oldNodeCleanup) => {
 }
 
 export const createElement = (tag, attrs, ...children) => (parent, oldNodeCleanup) => {
-  const node = document.createElement(tag)
+  const node = hydrating ? walk() : document.createElement(tag)
+  const patch = patchAttributes(node)
   attrs?.[reactiveSymbol]
-    ? effect2((attrs) => patchAttributes(node, attrs()), [attrs])
-    : patchAttributes(node, attrs)
+    ? effect2((attrs) => patch(attrs(), hydrating), [attrs])
+    : patch(attrs, hydrating)
 
-  for (const child of children) {
-    render(child)(node)
-  }
-  oldNodeCleanup ? oldNodeCleanup(parent, node) : parent.appendChild(node)
+  const temp = walk
+  hydrating && (walk = domWalker(node.childNodes))
+  for (const child of children) { render(child)(node) }
+  hydrating && (walk = temp)
+  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
 
   return (parent, newElement) => {
     parent.replaceChild(newElement, node)
@@ -105,8 +107,8 @@ export const render = vdom => {
 }
 
 export const createNullElement = () => (parent, oldNodeCleanup) => {
-  const node = document.createComment("|")
-  oldNodeCleanup ? oldNodeCleanup(parent, node) : parent.appendChild(node)
+  const node = hydrating ? walk() : document.createComment("|")
+  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
 
   return (parent, newElement) => {
     parent.replaceChild(newElement, node)
@@ -114,8 +116,8 @@ export const createNullElement = () => (parent, oldNodeCleanup) => {
 }
 
 export const createTextElement = (text) => (parent, oldNodeCleanup) => {
-  const node = document.createTextNode(text)
-  oldNodeCleanup ? oldNodeCleanup(parent, node) : parent.appendChild(node)
+  const node = hydrating ? (walk(), walk()) : document.createTextNode(text)
+  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
 
   return (parent, newElement) => {
     parent.replaceChild(newElement, node)
@@ -125,3 +127,20 @@ export const createTextElement = (text) => (parent, oldNodeCleanup) => {
 export const mount = (root, jsx) => {
   render(jsx)(root)
 }
+
+let hydrating = false
+export const hydrate = (root, jsx) => {
+  hydrating = true
+  walk = domWalker(root.childNodes)
+  render(jsx)(root)
+  hydrating = false
+}
+
+let walk
+const domWalker = children => {
+  let cursor = 0
+  console.log("NEW WALKER", { cursor, children })
+  return () => log(children[cursor++], {cursor, children})
+}
+
+const log = (item, ...args) => (console.log({ item }, ...args), item)

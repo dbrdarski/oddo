@@ -1,14 +1,18 @@
 var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
 // ../ui/src/reactive.mjs
 var reactiveSymbol = /* @__PURE__ */ Symbol.for("oddo::is-reactive-handler-property-symbol");
+var _a;
+_a = reactiveSymbol;
 var ReactiveContainer = class {
-  [reactiveSymbol] = true;
   constructor(getter) {
+    __publicField(this, _a, true);
     this.get = getter;
     Object.freeze(this);
   }
@@ -44,6 +48,27 @@ var computed = (fn, deps) => {
     }
     return cache;
   });
+};
+var effect = (fn, deps) => {
+  const effect3 = schedule.bind(null, () => fn(...deps));
+  deps = bindDependencies(deps, effect3);
+  effect3();
+};
+var effect2 = (fn, deps, run = true) => {
+  const effect3 = () => fn(...deps);
+  deps = bindDependencies(deps, schedule.bind(null, effect3));
+  run && effect3();
+};
+var queue = [];
+var schedule = (effect3) => {
+  queue.length || queueMicrotask(executeQueue);
+  queue.push(effect3);
+};
+var executeQueue = () => {
+  for (const effect3 of queue) {
+    effect3();
+  }
+  queue.length = 0;
 };
 var copyOnWrite = (target) => {
   let dirty = false;
@@ -183,25 +208,159 @@ var htmlEventHandlers = [
   "onpaste"
 ];
 var htmlEventList = new Set(htmlEventHandlers);
-var createAttributes = (props) => props ? Object.entries(props).map(createAttribute).join("") : "";
-var printAttribute = (key, value) => ` ${key}="${value.replaceAll('"', '\\"')}"`;
-var createAttribute = ([key, value]) => htmlEventList.has(key) || key === "ref" ? "" : value?.[reactiveSymbol] ? lift((value2) => printAttribute(key, value2()), [value]) : printAttribute(key, value);
-
-// ../ui/src/ssr.mjs
-var escapeMap = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-var noop2 = () => {
+var hydrateAttributes = (element, attrs) => {
+  for (const key in attrs) {
+    const maybeContainerValue = attrs[key];
+    const value = maybeContainerValue?.[reactiveSymbol] ? maybeContainerValue.get() : maybeContainerValue;
+    key === "ref" && value(element);
+    htmlEventList.has(key) && (element[key] = value);
+    value?.[reactiveSymbol] && effect2((value2) => setAttribute(element, key, value2(), oldValue), [value], false);
+  }
 };
-var escapeHtml = (unsafe) => unsafe.replace(/[&<>"']/g, (m) => escapeMap[m]);
-var createJsxExpression = (fn, deps) => () => lift((vdom) => render(vdom()), [computed(fn, deps)]);
-var createFragment = (...children) => () => `<!--<-->${children.map(render).join("")}<!-->-->`;
-var createElement = (tag, attrs, ...children) => () => `<${tag}${attrs?.[reactiveSymbol] ? lift((attrs2) => createAttributes(attrs2()), [attrs]) : createAttributes(attrs)}>${children.map(render).join("")}</${tag}>`;
-var createComponent = (component, props, ...children) => () => {
-  const expressionOrVdom = component.call({
-    onCleanup: noop2,
-    onMount: noop2
-    /* fn => initializers.push(fn) */
-  }, { props, children });
-  return render(expressionOrVdom);
+var patchAttributes = (element, oldAttrs = {}) => (newAttrs, hydrating2 = false) => {
+  if (hydrating2) {
+    oldAttrs = newAttrs;
+    return hydrateAttributes(element, newAttrs);
+  }
+  for (const key in oldAttrs) {
+    if (!(key in newAttrs)) {
+      removeAttribute(element, key);
+    }
+  }
+  for (const key in newAttrs) {
+    const oldValue2 = oldAttrs[key];
+    const newValue = newAttrs[key];
+    if (oldValue2 !== newValue) {
+      newValue?.[reactiveSymbol] ? effect2((newValue2) => setAttribute(element, key, newValue2(), oldValue2), [newValue], !hydrating2) : setAttribute(element, key, newValue, oldValue2);
+    }
+  }
+  oldAttrs = newAttrs;
+};
+var setAttribute = (element, key, value, oldValue2) => {
+  switch (key) {
+    case "ref":
+      return value(element);
+    case "style":
+      return typeof value === "string" ? element.style = value : patchStyle(element, oldValue2, value);
+    case "value":
+      return element.value = value ?? "";
+    case "checked":
+      return element.checked = !!value;
+    case "selected":
+      return element.selected = !!value;
+    // case "innerHTML":
+    //   return element.innerHTML = value ?? ""
+    default:
+      if (value == null || value === false) {
+        element.removeAttribute(key);
+      } else if (key.startsWith("on")) {
+        element[key] = value;
+      } else if (value == true) {
+        element.setAttribute(key, "");
+      } else {
+        element.setAttribute(key, value);
+      }
+  }
+};
+var removeAttribute = (element, key) => {
+  switch (key) {
+    case "value":
+      return element.value = null;
+    case "checked":
+    case "selected":
+      return element[key] = false;
+    default:
+      return key.startsWith("on") ? element[key] = null : element.removeAttribute(key);
+  }
+};
+var patchStyle = (element, oldStyle = {}, newStyle = {}) => {
+  for (const prop2 in oldStyle) {
+    if (!(prop2 in newStyle)) {
+      element.style[prop2] = null;
+    }
+  }
+  for (const prop2 in newStyle) {
+    if (oldStyle[prop2] !== newStyle[prop2]) {
+      element.style[prop2] = newStyle[prop2];
+    }
+  }
+};
+
+// ../ui/src/dom.mjs
+var emptyObject = {};
+var currentContext = null;
+var cleanupContext = (parent) => {
+  const { subscribe, notify: disposeChildren } = observable();
+  const { subscribe: onCleanup, notify: runCleanup } = observable();
+  const dispose = () => (runCleanup(), disposeChildren());
+  parent?.(dispose);
+  return { onCleanup, dispose, subscribe };
+};
+var createJsxExpression = (fn, deps) => (parent) => {
+  let patch;
+  let dispose;
+  let subscribe;
+  effect2(
+    (vdom) => {
+      dispose?.();
+      const content = vdom();
+      ({ dispose, subscribe } = typeof vdom === "function" ? cleanupContext(currentContext) : emptyObject);
+      const prevContext = currentContext;
+      currentContext = subscribe;
+      patch = render(content)(parent, patch);
+      currentContext = prevContext;
+    },
+    [computed(fn, deps)]
+  );
+};
+var createFragment = (...children) => (parent, oldNodeCleanup) => {
+  const node = new DocumentFragment();
+  const startNode = hydrating ? walk() : document.createComment("<");
+  hydrating || node.appendChild(startNode);
+  for (const child of children) {
+    render(child)(node);
+  }
+  const endNode = hydrating ? walk() : document.createComment(">");
+  hydrating || node.appendChild(endNode);
+  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node);
+  return (parent2, newElement) => {
+    const range = document.createRange();
+    range.setStart(startNode, 1);
+    range.setEnd(endNode, 0);
+    range.deleteContents();
+    parent2.replaceChild(newElement, startNode);
+  };
+};
+var createElement = (tag, attrs, ...children) => (parent, oldNodeCleanup) => {
+  const node = hydrating ? walk() : document.createElement(tag);
+  const patch = patchAttributes(node);
+  attrs?.[reactiveSymbol] ? effect2((attrs2) => patch(attrs2(), hydrating), [attrs]) : patch(attrs, hydrating);
+  const temp = walk;
+  hydrating && (walk = domWalker(node.childNodes));
+  for (const child of children) {
+    render(child)(node);
+  }
+  hydrating && (walk = temp);
+  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node);
+  return (parent2, newElement) => {
+    parent2.replaceChild(newElement, node);
+  };
+};
+var createComponent = (component, props, ...children) => (parent, oldNodeCleanup) => {
+  const initializers = [];
+  const { dispose, subscribe, onCleanup } = cleanupContext(currentContext);
+  const prevContext = currentContext;
+  currentContext = subscribe;
+  const expressionOrVdom = component.call({ onCleanup, onMount: (fn) => initializers.push(fn) }, { props, children });
+  const nodeCleanup = render(expressionOrVdom)(parent, oldNodeCleanup);
+  currentContext = prevContext;
+  for (const initializer of initializers) {
+    initializer();
+  }
+  return (parent2, newElement) => {
+    dispose();
+    nodeCleanup(parent2, newElement);
+  };
 };
 var render = (vdom) => {
   if (Array.isArray(vdom)) return createFragment(...vdom);
@@ -217,15 +376,37 @@ var render = (vdom) => {
     case "number":
       return createTextElement(vdom);
     case "function":
-      return vdom();
+      return vdom;
   }
 };
-var createNullElement = () => "<!--|-->";
-var createTextElement = (text) => `<!--T-->${escapeHtml(text)}`;
-
-// ../ui/src/index-ssr.mjs
-var effect = () => {
+var createNullElement = () => (parent, oldNodeCleanup) => {
+  const node = hydrating ? walk() : document.createComment("|");
+  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node);
+  return (parent2, newElement) => {
+    parent2.replaceChild(newElement, node);
+  };
 };
+var createTextElement = (text) => (parent, oldNodeCleanup) => {
+  const node = hydrating ? (walk(), walk()) : document.createTextNode(text);
+  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node);
+  return (parent2, newElement) => {
+    parent2.replaceChild(newElement, node);
+  };
+};
+var hydrating = false;
+var hydrate = (root2, jsx) => {
+  hydrating = true;
+  walk = domWalker(root2.childNodes);
+  render(jsx)(root2);
+  hydrating = false;
+};
+var walk;
+var domWalker = (children) => {
+  let cursor = 0;
+  console.log("NEW WALKER", { cursor, children });
+  return () => log(children[cursor++], { cursor, children });
+};
+var log = (item, ...args) => (console.log({ item }, ...args), item);
 
 // ../../node_modules/url-router/dist/index.js
 var dist_exports = {};
@@ -350,12 +531,6 @@ var dist_default = Router;
 // ../router/src/index.mjs
 var UrlRouter = dist_default || dist_exports;
 var ssrPath = null;
-var withSSR = (app) => (path) => {
-  ssrPath = path;
-  const result = app();
-  ssrPath = null;
-  return result;
-};
 var navigate = null;
 var Router2 = ({ props: { routes } }) => {
   const router = new UrlRouter(lift((routes2) => routes2(), [routes]));
@@ -735,9 +910,9 @@ function apply(func, thisArg, args) {
 var apply_default = apply;
 
 // ../../node_modules/lodash-es/noop.js
-function noop3() {
+function noop2() {
 }
-var noop_default = noop3;
+var noop_default = noop2;
 
 // ../../node_modules/lodash-es/_copyArray.js
 function copyArray(source, array) {
@@ -7889,8 +8064,8 @@ var BITS_START_FOR_ALT_IDX = 32 - BITS_FOR_ALT_IDX;
 // ../../node_modules/chevrotain/lib/src/parse/grammar/llk_lookahead.js
 var LLkLookaheadStrategy = class {
   constructor(options) {
-    var _a;
-    this.maxLookahead = (_a = options === null || options === void 0 ? void 0 : options.maxLookahead) !== null && _a !== void 0 ? _a : DEFAULT_PARSER_CONFIG.maxLookahead;
+    var _a2;
+    this.maxLookahead = (_a2 = options === null || options === void 0 ? void 0 : options.maxLookahead) !== null && _a2 !== void 0 ? _a2 : DEFAULT_PARSER_CONFIG.maxLookahead;
   }
   validate(options) {
     const leftRecursionErrors = this.validateNoLeftRecursion(options.rules);
@@ -9632,8 +9807,8 @@ var Parser = class _Parser {
           });
         }
         this.TRACE_INIT("ComputeLookaheadFunctions", () => {
-          var _a, _b;
-          (_b = (_a = this.lookaheadStrategy).initialize) === null || _b === void 0 ? void 0 : _b.call(_a, {
+          var _a2, _b;
+          (_b = (_a2 = this.lookaheadStrategy).initialize) === null || _b === void 0 ? void 0 : _b.call(_a2, {
             rules: values_default(this.gastProductionsCache)
           });
           this.preComputeLookaheadFunctions(values_default(this.gastProductionsCache));
@@ -10101,7 +10276,7 @@ var tokenClassMap = {
   // Identifier - default
   "Identifier": "identifier"
 };
-function escapeHtml2(text) {
+function escapeHtml(text) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 function highlightOddo(code) {
@@ -10121,16 +10296,16 @@ function highlightOddo(code) {
   for (const token of allTokenInstances) {
     if (token.startOffset > lastEnd) {
       const between = text.substring(lastEnd, token.startOffset);
-      html += escapeHtml2(between);
+      html += escapeHtml(between);
     }
     const tokenType = token.tokenType.name;
     const cssClass = tokenClassMap[tokenType] || "text";
-    const tokenText = escapeHtml2(token.image);
+    const tokenText = escapeHtml(token.image);
     html += `<span class="tok-${cssClass}">${tokenText}</span>`;
     lastEnd = token.startOffset + token.image.length;
   }
   if (lastEnd < text.length) {
-    html += escapeHtml2(text.substring(lastEnd));
+    html += escapeHtml(text.substring(lastEnd));
   }
   return html;
 }
@@ -10936,11 +11111,8 @@ var App = () => {
 };
 var app_default = App;
 
-// .temp-ssr/server.js
-var server_default = withSSR(() => render(createComponent(app_default, null)));
-export {
-  server_default as default
-};
+// .temp-ssr/client.js
+hydrate(document.getElementById("app"), createComponent(app_default, null));
 /*! Bundled license information:
 
 lodash-es/lodash.js:

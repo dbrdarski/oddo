@@ -1,0 +1,16 @@
+import { highlightOddo } from "@oddo/lang"
+import { ref } from "@oddo/ui"
+
+export default ({ props: { code } }) => {
+  codeElement = ref()
+
+  @effect () => {
+    highlighted = highlightOddo(code)
+    console.log("HERRO!!!!", { code, el: codeElement(), highlighted })
+    codeElement().innerHTML := highlighted
+  }
+
+  return <pre class="doc-code-block">
+      <code ref={codeElement}>{code}</code>
+    </pre>
+}

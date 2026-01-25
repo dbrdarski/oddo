@@ -1,6 +1,5 @@
-// Browser entry point
-import { mount } from "@oddo/ui"
+// Browser entry point - hydrates SSR content
+import { hydrate, mount } from "@oddo/ui"
 import App from "./app"
 
-mount(document.getElementById("app"), <App />)
-
+hydrate(document.getElementById("app"), <App />)

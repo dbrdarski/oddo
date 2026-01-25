@@ -18,6 +18,7 @@ const DIST_DIR = path.join(__dirname, 'dist')
 const TEMP_DIR = path.join(__dirname, '.temp')
 const UI_PACKAGE = path.join(__dirname, '..', 'ui', 'src', 'index.mjs')
 const LANG_PACKAGE = path.join(__dirname, '..', 'lang', 'src', 'index.mjs')
+const ROUTER_PACKAGE = path.join(__dirname, '..', 'router', 'src', 'index.mjs')
 
 // Import compiler
 const langPath = path.join(__dirname, '..', 'lang', 'src', 'index.mjs')
@@ -91,7 +92,8 @@ async function bundleJs(tempJsPath, destPath, relativePath) {
       target: ['es2020'],
       alias: {
         '@oddo/ui': UI_PACKAGE,
-        '@oddo/lang': LANG_PACKAGE
+        '@oddo/lang': LANG_PACKAGE,
+        '@oddo/router': ROUTER_PACKAGE
       },
       logLevel: 'silent'
     })
@@ -134,9 +136,9 @@ async function build() {
         const tempJsPath = await compileOddo(fullSrcPath, relativePath)
         
         if (tempJsPath) {
-          // Only bundle entry points (top-level files, not in subdirectories)
-          if (!relativePath.includes(path.sep) || relativePath.startsWith('app.')) {
-            entryPoints.push({ tempJsPath, relativePath })
+          // Bundle client.oddo as app.js (the browser entry point)
+          if (relativePath === 'client.oddo') {
+            entryPoints.push({ tempJsPath, relativePath: 'app.oddo' })
           }
         }
       }
@@ -180,10 +182,10 @@ async function main() {
           const tempJsPath = await compileOddo(srcPath, relativePath)
           
           if (tempJsPath) {
-            // Only bundle if it's an entry point
-            if (!relativePath.includes(path.sep) || relativePath.startsWith('app.')) {
-              const destPath = path.join(DIST_DIR, relativePath.replace('.oddo', '.js'))
-              await bundleJs(tempJsPath, destPath, relativePath)
+            // Bundle client.oddo as app.js (the browser entry point)
+            if (relativePath === 'client.oddo') {
+              const destPath = path.join(DIST_DIR, 'app.js')
+              await bundleJs(tempJsPath, destPath, 'app.oddo')
             }
           }
         }

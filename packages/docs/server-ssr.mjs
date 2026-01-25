@@ -23,15 +23,17 @@ const PACKAGES_DIR = path.join(__dirname, '..')
 
 // SSR package paths
 const UI_SSR_PACKAGE = path.join(PACKAGES_DIR, 'ui', 'src', 'index-ssr.mjs')
+const UI_DOM_PACKAGE = path.join(PACKAGES_DIR, 'ui', 'src', 'index.mjs')
 const ROUTER_SRC = path.join(PACKAGES_DIR, 'router', 'src', 'index.mjs')
 const LANG_PACKAGE = path.join(PACKAGES_DIR, 'lang', 'src', 'index.mjs')
 
 // Import compiler
 const langPath = path.join(PACKAGES_DIR, 'lang', 'src', 'index.mjs')
-let compileOddoToJS
+let parseOddo, compileOddoToJS
 
 async function loadCompiler() {
   const lang = await import(langPath)
+  parseOddo = lang.parseOddo
   compileOddoToJS = lang.compileOddoToJS
 }
 
@@ -117,6 +119,34 @@ async function buildSSR() {
   const stats = fs.statSync(bundlePath)
   console.log(`📦 Bundled: ssr-bundle.mjs (${(stats.size / 1024).toFixed(1)}KB)`)
 
+  // Phase 3: Bundle client.js for hydration
+  console.log('\nPhase 3: Bundling client for hydration...')
+
+  const clientTempPath = path.join(TEMP_DIR, 'client.js')
+  const clientBundlePath = path.join(DIST_SSR_DIR, 'client.js')
+
+  if (!fs.existsSync(clientTempPath)) {
+    throw new Error('client.js not found in temp directory')
+  }
+
+  await esbuild.build({
+    entryPoints: [clientTempPath],
+    bundle: true,
+    format: 'esm',
+    outfile: clientBundlePath,
+    platform: 'browser',
+    target: ['es2020'],
+    alias: {
+      '@oddo/ui': UI_DOM_PACKAGE,
+      '@oddo/router': ROUTER_SRC,
+      '@oddo/lang': LANG_PACKAGE
+    },
+    logLevel: 'silent'
+  })
+
+  const clientStats = fs.statSync(clientBundlePath)
+  console.log(`📦 Bundled: client.js (${(clientStats.size / 1024).toFixed(1)}KB)`)
+
   // Clean up temp
   if (fs.existsSync(TEMP_DIR)) {
     fs.rmSync(TEMP_DIR, { recursive: true, force: true })
@@ -129,9 +159,9 @@ async function buildSSR() {
 // Load the SSR bundle and return the render function
 async function loadSSRBundle(bundlePath) {
   console.log('📦 Loading SSR bundle...')
-  
+
   const { default: renderApp } = await import(bundlePath + `?t=${Date.now()}`)
-  
+
   console.log('✅ SSR bundle loaded')
   return renderApp
 }
@@ -152,10 +182,10 @@ function injectIntoTemplate(appHtml) {
     `<div id="app">${appHtml}</div>`
   )
 
-  // Remove the client-side script for pure SSR
+  // Replace the SPA script with the hydration client script
   return html.replace(
     '<script src="./app.js"></script>',
-    '<!-- SSR rendered - no client JS -->'
+    '<script type="module" src="./client.js"></script>'
   )
 }
 
@@ -203,9 +233,80 @@ async function start() {
   const renderApp = await loadSSRBundle(bundlePath)
 
   // Start server
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`)
     console.log(`${req.method} ${url.pathname}`)
+
+    // Compile endpoint (Playground API)
+    if (url.pathname === '/compile' && req.method === 'POST') {
+      let body = ''
+      req.on('data', chunk => { body += chunk.toString() })
+      req.on('end', () => {
+        try {
+          const { code } = JSON.parse(body)
+          const ast = parseOddo(code)
+          const js = compileOddoToJS(code, { runtimeLibrary: '@oddo/ui' })
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ ast, js }))
+        } catch (err) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: err.message }))
+        }
+      })
+      return
+    }
+
+    // Preview endpoint (Playground API)
+    if (url.pathname === '/preview' && req.method === 'POST') {
+      let body = ''
+      req.on('data', chunk => { body += chunk.toString() })
+      req.on('end', async () => {
+        try {
+          const { js } = JSON.parse(body)
+          const result = await esbuild.build({
+            stdin: {
+              contents: js,
+              loader: 'js',
+              resolveDir: __dirname
+            },
+            bundle: true,
+            treeShaking: true,
+            format: 'iife',
+            platform: 'browser',
+            target: ['es2020'],
+            write: false,
+            alias: {
+              '@oddo/ui': UI_DOM_PACKAGE
+            },
+            logLevel: 'silent'
+          })
+          const bundledCode = result.outputFiles[0].text
+          const html = `<!DOCTYPE html>
+<html><head><style>body{margin:0;font-family:system-ui,sans-serif;}</style></head>
+<body>
+<script>
+try {
+${bundledCode}
+} catch(e) {
+  document.body.innerHTML='<pre style="color:red;padding:20px;">Error: '+e.message+'</pre>';
+}
+</script>
+</body></html>`
+          res.writeHead(200, { 'Content-Type': 'text/html' })
+          res.end(html)
+        } catch (err) {
+          res.writeHead(200, { 'Content-Type': 'text/html' })
+          res.end(`<pre style="color:red;padding:20px;">Bundle Error: ${err.message}</pre>`)
+        }
+      })
+      return
+    }
+
+    // Serve client bundle from dist-ssr
+    if (url.pathname === '/client.js') {
+      serveFile(res, path.join(DIST_SSR_DIR, 'client.js'))
+      return
+    }
 
     // Serve static files (files with extensions)
     if (url.pathname.includes('.')) {
@@ -218,9 +319,9 @@ async function start() {
     try {
       const appHtml = renderPath(renderApp, url.pathname)
       const fullHtml = injectIntoTemplate(appHtml)
-      
+
       console.log(`  ✅ SSR: ${url.pathname} (${appHtml.length} chars)`)
-      
+
       res.writeHead(200, {
         'Content-Type': 'text/html',
         'Cache-Control': 'no-cache'
@@ -237,14 +338,14 @@ async function start() {
     console.log(`
 ╔══════════════════════════════════════════════════╗
 ║                                                  ║
-║   🖥️  Oddo SSR Server (Multi-Route)               ║
+║   🖥️  Oddo SSR + Hydration Server                 ║
 ║                                                  ║
 ║   http://localhost:${PORT}                          ║
 ║                                                  ║
 ║   Routes:                                        ║
 ║     /           -> GuidePage                     ║
 ║     /api        -> APIPage                       ║
-║     /playground -> Playground                   ║
+║     /playground -> Playground                    ║
 ║                                                  ║
 ║   Ctrl+C to stop                                 ║
 ║                                                  ║

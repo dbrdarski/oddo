@@ -49,8 +49,8 @@ export function parseOddo(input) {
     throw new Error(`Parser errors: ${JSON.stringify(errors)}`);
   }
 
-  // Convert CST to AST
-  const ast = convertCSTToAST(cst);
+  // Convert CST to AST (pass source for JSX whitespace preservation)
+  const ast = convertCSTToAST(cst, input);
   return ast;
 }
 
@@ -86,8 +86,8 @@ export function parseOddoExpression(input) {
     throw new Error(`Parser errors: ${JSON.stringify(errors)}`);
   }
 
-  // Convert CST to AST
-  const ast = convertExpression(cst);
+  // Convert CST to AST (pass source for JSX whitespace preservation)
+  const ast = convertExpression(cst, input);
   return ast;
 }
 

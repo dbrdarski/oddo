@@ -2,13 +2,14 @@ export {
   ref,
   state,
   computed,
-  effect,
   transact as mutate,
   transact,
   stateProxy,
   lift,
   liftFn
 } from "./reactive.mjs"
+
+export const effect = () => {}
 
 export {
   createElement,
@@ -19,6 +20,5 @@ export {
   createFragment as f,
   createJsxExpression,
   createJsxExpression as x,
-  mount,
-  hydrate
-} from "./dom.mjs";
+  render
+} from "./ssr.mjs";

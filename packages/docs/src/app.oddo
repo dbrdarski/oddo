@@ -11,7 +11,7 @@ import Playground from "./pages/playground"
 App = () => {
   return <div class="layout">
     <header>
-      <div class="logo">&lt;oddo/&gt;</div>
+      <div class="logo">oddo</div>
       <div class="divider"></div>
       <nav class="nav-tabs">
         <button
@@ -29,13 +29,13 @@ App = () => {
       </nav>
     </header>
     <main class="main-content">
-      <Router 
-        routes={{ 
-          "/": <GuidePage />, 
-          "/api": <APIPage />, 
+      <Router
+        routes={{
+          "/": <GuidePage />,
+          "/api": <APIPage />,
           "/playground": <Playground />,
           "(.*)": "Not found"
-        }} 
+        }}
       />
     </main>
   </div>

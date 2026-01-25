@@ -5,6 +5,9 @@
 
 import { parseOddoExpression } from './index.mjs';
 
+// Module-level variable to store source text for JSX text extraction
+let sourceText = '';
+
 // Helper functions
 function getTokenValue(token) {
   if (!token) return null;
@@ -220,8 +223,14 @@ function convertImportSpecifier(cst) {
 }
 
 // Convert expression
-export function convertExpression(cst) {
+// Optional source parameter for entry point calls (sets sourceText for JSX whitespace)
+export function convertExpression(cst, source) {
   if (!cst) return null;
+  
+  // If source provided (entry point call), store it for JSX text extraction
+  if (source !== undefined) {
+    sourceText = source;
+  }
 
   // Check node name first (for recursive calls on nested nodes)
   const nodeName = cst.name;
@@ -1869,9 +1878,7 @@ function convertJSXElement(cst) {
 
   let children = [];
   if (!isSelfClosing) {
-      children = getAllChildren(cst, 'jsxChild')
-        .map(convertJSXChild)
-        .filter(child => child !== null); // Filter out null children (empty text nodes)
+      children = convertJSXChildren(getAllChildren(cst, 'jsxChild'));
   }
 
   return {
@@ -1890,9 +1897,7 @@ function convertJSXFragment(cst) {
   // JSX Fragment: <> ... </>
   // No element name, no attributes, just children
   const childrenCST = getAllChildren(cst, 'jsxChild');
-  const children = childrenCST
-    .map(convertJSXChild)
-    .filter(child => child !== null); // Filter out null children (empty text nodes)
+  const children = convertJSXChildren(childrenCST);
 
   return {
     type: 'jsxFragment',
@@ -2005,6 +2010,92 @@ function decodeHTMLEntities(text) {
   });
 }
 
+/**
+ * Convert JSX children, preserving whitespace between them
+ * Uses sourceText to extract actual whitespace from the original source
+ */
+function convertJSXChildren(childrenCST) {
+  if (!childrenCST || childrenCST.length === 0) return [];
+
+  // Get offset info for each child CST node
+  const childrenWithOffsets = childrenCST.map(child => {
+    const firstOffset = getFirstTokenOffset(child);
+    const lastOffset = getLastTokenOffset(child);
+    return { cst: child, firstOffset, lastOffset };
+  }).filter(c => c.firstOffset !== undefined);
+
+  // Sort by offset
+  childrenWithOffsets.sort((a, b) => a.firstOffset - b.firstOffset);
+
+  const result = [];
+  
+  for (let i = 0; i < childrenWithOffsets.length; i++) {
+    const current = childrenWithOffsets[i];
+    
+    // Check for whitespace gap BEFORE this child (after previous child)
+    if (i > 0 && sourceText) {
+      const prev = childrenWithOffsets[i - 1];
+      const gapStart = prev.lastOffset + 1;
+      const gapEnd = current.firstOffset;
+      
+      if (gapEnd > gapStart) {
+        // There's a gap - extract whitespace from source
+        const gap = sourceText.slice(gapStart, gapEnd);
+        // Only add if it contains actual whitespace (not empty)
+        if (gap && /\s/.test(gap)) {
+          // Normalize multiple whitespace to single space for cleaner output
+          result.push({ type: 'jsxText', value: ' ' });
+        }
+      }
+    }
+    
+    // Convert the child itself
+    const converted = convertJSXChild(current.cst);
+    if (converted !== null) {
+      result.push(converted);
+    }
+  }
+  
+  return result;
+}
+
+/**
+ * Get the last token's end offset from a CST node
+ */
+function getLastTokenOffset(node) {
+  if (!node) return undefined;
+  
+  // If this node has endOffset, return it
+  if (node.endOffset !== undefined) {
+    return node.endOffset;
+  }
+  
+  // If it's a token with image, calculate end offset
+  if (node.image !== undefined && node.startOffset !== undefined) {
+    return node.startOffset + node.image.length - 1;
+  }
+  
+  // Search through children for the last token
+  let lastOffset;
+  if (node.children) {
+    for (const key in node.children) {
+      const children = node.children[key];
+      if (Array.isArray(children)) {
+        for (const child of children) {
+          const childOffset = getLastTokenOffset(child);
+          if (childOffset !== undefined) {
+            if (lastOffset === undefined || childOffset > lastOffset) {
+              lastOffset = childOffset;
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return lastOffset;
+}
+
 function convertJSXChild(cst) {
   if (cst.children.jsxElement) {
     return convertJSXElement(getFirstChild(cst, 'jsxElement'));
@@ -2084,8 +2175,11 @@ function convertJSXChild(cst) {
   return null;
 }
 
-function convertCSTToAST(cst) {
+function convertCSTToAST(cst, source = '') {
   if (!cst) return null;
+
+  // Store source text for JSX text extraction (preserves whitespace)
+  sourceText = source;
 
   // Entry point - convert program CST to AST
   if (cst.name === 'program') {

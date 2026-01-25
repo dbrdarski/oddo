@@ -1,11 +1,11 @@
 import { e } from "@oddo/ui"
-import { highlightOddo } from "@oddo/lang"
 import code1 from "./guide/code1"
 import code2 from "./guide/code2"
 import code3 from "./guide/code3"
 import code4 from "./guide/code4"
 import code5 from "./guide/code5"
 import { A } from "@oddo/router"
+import CodeExample from "../components/CodeExample"
 
 GuidePage = () => {
   atSign = "@"
@@ -29,38 +29,38 @@ GuidePage = () => {
         <div class="doc-feature">
           <h3>Arrow Function Components</h3>
           <p>Components are simple arrow functions. Reactive state and mutations are declared inline with modifiers.</p>
-          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code1) })}</pre>
+          <CodeExample code={ code1 } />
         </div>
 
         <div class="doc-feature">
           <h3>Mutation with :=</h3>
           <p>Oddo distinguishes binding (=) from mutation (:=). This makes state changes explicit and predictable.</p>
-          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code2) })}</pre>
+          <CodeExample code={ code2 } />
         </div>
 
         <div class="doc-feature">
           <h3>Value decorators</h3>
           <p>Reactive primitives use the {atSign} prefix for clarity. At a glance, you know what is reactive.</p>
-          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code3) })}</pre>
+          <CodeExample code={ code3 } />
         </div>
 
         <div class="doc-feature">
           <h3>JSX-First UI</h3>
           <p>JSX is a first-class citizen. Build reactive interfaces naturally with familiar syntax.</p>
-          <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code4) })}</pre>
+          <CodeExample code={ code4 } />
         </div>
       </section>
 
       <section class="doc-section">
         <h2>Hello World</h2>
         <p>Here is the simplest Oddo application:</p>
-        <pre class="doc-code-block">{e("code", { innerHTML: highlightOddo(code5) })}</pre>
+          <CodeExample code={ code5 } />
         <p>That is it. No boilerplate, no configuration. Just write and run.</p>
       </section>
 
       <section class="doc-section">
         <h2>Ready to Explore?</h2>
-        <p>Head to the <A href="/api">API</A> tab to learn about all the features, or jump into the <A href="/playground">Playground</A> to start writing code immediately.</p>
+        <p>Head to the <A href="/api"><strong>API</strong></A> tab to learn about all the features, or jump into the <A href="/playground"><strong>Playground</strong></A> to start writing code immediately.</p>
       </section>
     </div>
   </div>

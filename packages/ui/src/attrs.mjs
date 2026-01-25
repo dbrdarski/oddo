@@ -1,8 +1,29 @@
-import { reactiveSymbol, effect2 } from "./reactive.mjs"
-export const patchAttributes = (el, newAttrs, oldAttrs = {}) => {
+import { reactiveSymbol, effect2, lift } from "./reactive.mjs"
+
+const htmlEventHandlers = [
+  "onpointerdown", "onpointerup", "onpointermove", "onpointerover", "onpointerout", "onpointerenter", "onpointerleave", "onpointercancel", "ongotpointercapture", "onlostpointercapture", "onclick", "ondblclick", "onmousedown", "onmouseup", "onmouseover", "onmouseout", "onmouseenter", "onmouseleave", "onmousemove", "oncontextmenu", "onwheel", "onauxclick", "onkeydown", "onkeyup", "onkeypress", "oninput", "onchange", "onfocus", "onblur", "onfocusin", "onfocusout", "onsubmit", "onreset", "oninvalid", "onsearch", "onselect", "onbeforeinput", "ondrag", "ondragstart", "ondragend", "ondragenter", "ondragleave", "ondragover", "ondrop", "onplay", "onpause", "onplaying", "onended", "onvolumechange", "onwaiting", "onstalled", "onsuspend", "onprogress", "oncanplay", "oncanplaythrough", "onloadeddata", "onloadedmetadata", "onloadstart", "ondurationchange", "onratechange", "onseeked", "onseeking", "onanimationstart", "onanimationend", "onanimationiteration", "ontransitionstart", "ontransitionend", "ontransitionrun", "ontransitioncancel", "onload", "onerror", "onscroll", "onscrollend", "onresize", "ontoggle", "oncopy", "oncut", "onpaste"
+];
+const htmlEventList = new Set(htmlEventHandlers)
+
+const hydrateAttributes = (element, attrs) => {
+  for (const key in attrs) {
+    const maybeContainerValue = attrs[key]
+    const value = maybeContainerValue?.[reactiveSymbol] ? maybeContainerValue.get() : maybeContainerValue;
+    key === "ref" && value(element)
+    htmlEventList.has(key) && (element[key] = value)
+    value?.[reactiveSymbol] && effect2((value) => setAttribute(element, key, value(), oldValue), [value], false)
+  }
+}
+
+export const patchAttributes = (element, oldAttrs = {}) => (newAttrs, hydrating = false) => {
+  if (hydrating) {
+    oldAttrs = newAttrs
+    return hydrateAttributes(element, newAttrs)
+  }
+
   for (const key in oldAttrs) {
     if (!(key in newAttrs)) {
-      removeAttribute(el, key)
+      removeAttribute(element, key)
     }
   }
 
@@ -12,14 +33,17 @@ export const patchAttributes = (el, newAttrs, oldAttrs = {}) => {
 
     if (oldValue !== newValue) {
       newValue?.[reactiveSymbol]
-        ? effect2((newValue) => setAttribute(el, key, newValue(), oldValue), [newValue])
-        : setAttribute(el, key, newValue, oldValue)
+        ? effect2((newValue) => setAttribute(element, key, newValue(), oldValue), [newValue], !hydrating)
+        : setAttribute(element, key, newValue, oldValue)
     }
   }
+  oldAttrs = newAttrs
 }
 
 const setAttribute = (element, key, value, oldValue) => {
   switch (key) {
+    case "ref":
+      return value(element)
     case "style":
       return typeof value === "string"
         ? element.style = value
@@ -30,8 +54,8 @@ const setAttribute = (element, key, value, oldValue) => {
       return element.checked = !!value
     case "selected":
       return element.selected = !!value
-    case "innerHTML":
-      return element.innerHTML = value ?? ""
+    // case "innerHTML":
+    //   return element.innerHTML = value ?? ""
     default:
       if (value == null || value === false) {
         element.removeAttribute(key)
@@ -71,3 +95,15 @@ const patchStyle = (element, oldStyle = {}, newStyle = {}) => {
     }
   }
 }
+
+export const createAttributes = props => props
+  ? Object.entries(props)
+    .map(createAttribute)
+    .join("")
+  : ""
+
+
+const printAttribute = (key, value) => ` ${key}="${value.replaceAll("\"", "\\\"")}"`
+const createAttribute = ([key, value]) => (htmlEventList.has(key) || key === "ref") ? "" : value?.[reactiveSymbol]
+  ? lift(value => printAttribute(key, value()), [value])
+  : printAttribute(key, value)
