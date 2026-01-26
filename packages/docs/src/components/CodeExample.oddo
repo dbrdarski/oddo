@@ -6,7 +6,6 @@ export default ({ props: { code } }) => {
 
   @effect () => {
     highlighted = highlightOddo(code)
-    console.log("HERRO!!!!", { code, el: codeElement(), highlighted })
     codeElement().innerHTML := highlighted
   }
 

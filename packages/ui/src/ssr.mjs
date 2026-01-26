@@ -4,13 +4,13 @@ import { createAttributes } from "./attrs.mjs";
 const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 
 const noop = () => {}
-const escapeHtml = unsafe => unsafe.replace(/[&<>"']/g, (m) => escapeMap[m])
+const escapeHtml = unsafe => String(unsafe).replace(/[&<>"']/g, (m) => escapeMap[m])
 
 export const createJsxExpression = (fn, deps) => () =>
   lift((vdom) => render(vdom()), [computed(fn, deps)])
 
 export const createFragment = (...children) => () =>
-  `<!--<-->${children.map(render).join("")}<!-->-->`
+  `<!--[-->${children.map(render).join("")}<!--]-->`
 
 export const createElement = (tag, attrs, ...children) => () =>
   `<${tag}${attrs?.[reactiveSymbol]
@@ -25,7 +25,7 @@ export const createComponent = (component, props, ...children) => () => {
 }
 
 export const render = vdom => {
-  if (Array.isArray(vdom)) return createFragment(...vdom)
+  if (Array.isArray(vdom)) return render(createFragment(...vdom))
   switch (vdom) {
     case true:
     case false:

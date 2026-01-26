@@ -12,6 +12,7 @@ GuidePage = () => {
 
   return <div class="doc-page">
     <div class="doc-content">
+     {[1, 2, 3]}
       <section class="doc-hero">
         <h1>Welcome to Oddo</h1>
         <p class="doc-lead">A functional reactive programing language.</p>
