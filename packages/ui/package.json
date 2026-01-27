@@ -1,6 +1,6 @@
 {
   "name": "@oddo/ui",
-  "version": "0.0.7",
+  "version": "0.0.10",
   "type": "module",
   "description": "Oddo UI Framework",
   "main": "./dist/index.js",

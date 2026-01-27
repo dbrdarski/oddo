@@ -1051,6 +1051,7 @@ function convertPostfix(cst) {
 function convertFunctionCall(cst) {
   let callee = convertExpression(getFirstChild(cst, 'memberAccess'));
   const leftParens = cst.children.LeftParen || [];
+  const rightParens = cst.children.RightParen || [];
   const questionDots = cst.children.QuestionDot || [];
   const templateLiterals = cst.children.TemplateLiteral || [];
 
@@ -1074,8 +1075,14 @@ function convertFunctionCall(cst) {
   const allExprs = getAllChildren(cst, 'expression');
 
   // Build unified operations list sorted by offset
+  // For function calls, include the matching RightParen offset for argument matching
   const ops = [
-    ...leftParens.map((t, i) => ({ k: 'c', off: t.startOffset, i, token: t })),
+    ...leftParens.map((t, i) => ({ 
+      k: 'c', 
+      off: t.startOffset, 
+      token: t,
+      rightParen: rightParens[i]
+    })),
     ...dots.map((t, i) => ({ k: 'd', off: t.startOffset, i })),
     ...brackets.map((t, i) => ({ k: 'b', off: t.startOffset, i, end: rightBrackets[i]?.endOffset })),
     ...questionDots.filter(q => !leftParens.some(p => Math.abs(p.startOffset - q.endOffset) <= 1))
@@ -1088,7 +1095,16 @@ function convertFunctionCall(cst) {
     if (op.k === 'c') {
       // Function call
       const isOptional = questionDots.some(q => q.endOffset < op.token.startOffset && op.token.startOffset - q.endOffset <= 1);
-      const argsCST = argLists[op.i];
+      
+      // Find the argumentList that falls between this LeftParen and its matching RightParen
+      // argumentList nodes are only created when there are arguments, so we match by position
+      const leftOff = op.token.startOffset;
+      const rightOff = op.rightParen?.endOffset;
+      const argsCST = argLists.find(al => {
+        const alStart = getFirstTokenOffset(al);
+        return alStart !== undefined && alStart > leftOff && (rightOff === undefined || alStart < rightOff);
+      });
+      
       const args = [];
       if (argsCST) {
         const exprs = getAllChildren(argsCST, 'expression');
@@ -1128,6 +1144,7 @@ function convertMemberAccess(cst) {
   const dots = cst.children.Dot || [];
   const questionDots = cst.children.QuestionDot || [];
   const brackets = cst.children.LeftBracket || [];
+  const rightBrackets = cst.children.RightBracket || [];
   const dotDotDots = cst.children.DotDotDot || [];
 
   // If no member access operators, just return the object
@@ -1143,118 +1160,124 @@ function convertMemberAccess(cst) {
     allOps.push({ type: 'dot', token: dot, optional: false });
   }
 
-  // Add question dots (optional property access)
+  // Add question dots (optional property access) - but only those followed by an identifier, not brackets
   for (const qDot of questionDots) {
-    allOps.push({ type: 'dot', token: qDot, optional: true });
+    // Check if this questionDot is followed by a bracket (optional bracket access)
+    const isFollowedByBracket = brackets.some(b => b.startOffset > qDot.endOffset && b.startOffset - qDot.endOffset <= 1);
+    if (!isFollowedByBracket) {
+      allOps.push({ type: 'dot', token: qDot, optional: true });
+    }
+  }
+
+  // Add brackets (computed property access or array slices)
+  for (let i = 0; i < brackets.length; i++) {
+    const bracket = brackets[i];
+    const rightBracket = rightBrackets[i];
+    if (!rightBracket) continue;
+
+    // Check if this bracket is preceded by a QuestionDot (optional chaining)
+    const isOptional = questionDots.some(qDot => 
+      qDot.endOffset < bracket.startOffset && bracket.startOffset - qDot.endOffset <= 1
+    );
+
+    // Check for DotDotDot tokens between this bracket pair (slice)
+    const dotDotDotsInRange = dotDotDots.filter(ddd =>
+      ddd.startOffset > bracket.startOffset && ddd.startOffset < rightBracket.startOffset
+    );
+
+    allOps.push({ 
+      type: 'bracket', 
+      token: bracket, 
+      rightBracket,
+      optional: isOptional,
+      isSlice: dotDotDotsInRange.length > 0
+    });
   }
 
   // Sort by offset to maintain original order
   allOps.sort((a, b) => a.token.startOffset - b.token.startOffset);
 
-  // Process dots (dot notation: obj.prop and obj?.prop)
-  // Identifiers array contains all identifiers after the primary one
+  // Identifiers and expressions are consumed in order
   const identifiers = cst.children.Identifier || [];
-  let identifierIndex = 0;
-
-  for (let i = 0; i < allOps.length; i++) {
-    const op = allOps[i];
-    const identifier = identifiers[identifierIndex];
-    if (identifier) {
-      identifierIndex++;
-      object = {
-        type: 'memberAccess',
-        object,
-        property: identifier.image,
-        computed: false,
-        optional: op.optional,
-      };
-    }
-  }
-
-  // Process brackets (bracket notation: obj[prop], obj?.[prop], or array slices)
   const expressions = getAllChildren(cst, 'expression');
+  let identifierIndex = 0;
   let expressionIndex = 0;
 
-  for (let i = 0; i < brackets.length; i++) {
-    const bracket = brackets[i];
-    const bracketStart = bracket.startOffset;
-
-    // Check if this bracket is preceded by a QuestionDot (optional chaining)
-    const isOptional = questionDots.some(qDot => {
-      // QuestionDot should be immediately before this bracket
-      return qDot.endOffset < bracketStart && bracketStart - qDot.endOffset <= 1;
-    });
-
-    // Check if this bracket pair contains a slice
-    // Find the corresponding RightBracket
-    const rightBrackets = cst.children.RightBracket || [];
-    const rightBracket = rightBrackets[i];
-
-    if (!rightBracket) continue;
-
-    // Check for DotDotDot tokens between this bracket pair
-    const dotDotDotsInRange = dotDotDots.filter(ddd =>
-      ddd.startOffset > bracketStart && ddd.startOffset < rightBracket.startOffset
-    );
-
-    // If there's a DotDotDot in this bracket pair, it's a slice
-    if (dotDotDotsInRange.length > 0) {
-      // Pattern: [...] - copy entire array (no expressions)
-      if (expressions.length === expressionIndex) {
+  // Process all operations in source order
+  for (const op of allOps) {
+    if (op.type === 'dot') {
+      // Dot notation: obj.prop or obj?.prop
+      const identifier = identifiers[identifierIndex];
+      if (identifier) {
+        identifierIndex++;
         object = {
-          type: 'arraySlice',
+          type: 'memberAccess',
           object,
-          start: null,
-          end: null,
+          property: identifier.image,
+          computed: false,
+          optional: op.optional,
         };
-        continue;
       }
+    } else if (op.type === 'bracket') {
+      if (op.isSlice) {
+        // Array slice patterns
+        // Count expressions that fall within this bracket pair
+        const exprsInBracket = expressions.filter((e, idx) => {
+          if (idx < expressionIndex) return false;
+          const exprStart = getFirstTokenOffset(e);
+          return exprStart > op.token.startOffset && exprStart < op.rightBracket.startOffset;
+        });
 
-      // Pattern: [expression...expression] - slice with start and end (two expressions)
-      if (expressions.length >= expressionIndex + 2) {
-        const startExpr = expressions[expressionIndex];
-        const endExpr = expressions[expressionIndex + 1];
-        expressionIndex += 2;
-        object = {
-          type: 'arraySlice',
-          object,
-          start: convertExpression(startExpr),
-          end: convertExpression(endExpr),
-        };
-        continue;
+        if (exprsInBracket.length === 0) {
+          // Pattern: [...] - copy entire array
+          object = {
+            type: 'arraySlice',
+            object,
+            start: null,
+            end: null,
+          };
+        } else if (exprsInBracket.length >= 2) {
+          // Pattern: [expression...expression] - slice with start and end
+          const startExpr = expressions[expressionIndex];
+          const endExpr = expressions[expressionIndex + 1];
+          expressionIndex += 2;
+          object = {
+            type: 'arraySlice',
+            object,
+            start: convertExpression(startExpr),
+            end: convertExpression(endExpr),
+          };
+        } else {
+          // Pattern: [expression...] - slice from start
+          const startExpr = expressions[expressionIndex];
+          expressionIndex++;
+          object = {
+            type: 'arraySlice',
+            object,
+            start: convertExpression(startExpr),
+            end: null,
+          };
+        }
+      } else {
+        // Regular bracket access: obj[expr] or obj?.[expr]
+        if (expressions.length > expressionIndex) {
+          const exprCst = expressions[expressionIndex];
+          expressionIndex++;
+          const property = convertExpression(exprCst);
+          object = {
+            type: 'memberAccess',
+            object,
+            property,
+            computed: true,
+            optional: op.optional,
+          };
+        }
       }
-
-      // Pattern: [expression...] - slice from start (one expression)
-      if (expressions.length === expressionIndex + 1) {
-        const startExpr = expressions[expressionIndex];
-        expressionIndex++;
-        object = {
-          type: 'arraySlice',
-          object,
-          start: convertExpression(startExpr),
-          end: null,
-        };
-        continue;
-      }
-    }
-
-    // Pattern: [expression] - regular bracket access
-    if (expressions.length > expressionIndex) {
-      const exprCst = expressions[expressionIndex];
-      expressionIndex++;
-      const property = convertExpression(exprCst);
-      object = {
-        type: 'memberAccess',
-        object,
-        property,
-        computed: true,
-        optional: isOptional,
-      };
     }
   }
 
   return object;
-  }
+}
 
 function convertPrimary(cst) {
   if (cst.children.literal) {

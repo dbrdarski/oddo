@@ -31,7 +31,7 @@ export const state = (state) => {
 }
 
 export const bindDependencies = (deps, cleanup) =>
-  deps.map(dep => dep[reactiveSymbol] ? dep.get.bind(null, cleanup) : () => dep)
+  deps.map(dep => dep?.[reactiveSymbol] ? dep.get.bind(null, cleanup) : () => dep)
 
 export const computed = (fn, deps) => {
   const { subscribe, notify } = observable()
