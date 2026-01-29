@@ -145,7 +145,7 @@ export const createAccessor = (target) => {
       }
     })
   }
-  return () => target
+  return target
 }
 
 const liftValue = arg => arg?.[reactiveSymbol] ? arg.get() : arg
