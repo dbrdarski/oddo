@@ -1,6 +1,6 @@
 {
   "name": "@oddo/docs",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "type": "module",
   "description": "Documentation and examples for the Oddo framework",
   "scripts": {
@@ -32,9 +32,9 @@
     "url": "https://github.com/dbrdarski/oddo/issues"
   },
   "dependencies": {
-    "@oddo/lang": "^0.0.2",
-    "@oddo/ui": "^0.0.4",
-    "@oddo/router": "^0.0.4",
+    "@oddo/lang": "^0.0.4",
+    "@oddo/ui": "^0.0.15",
+    "@oddo/router": "^0.0.8",
     "esbuild": "^0.27.2"
   }
 }

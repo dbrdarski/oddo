@@ -806,6 +806,17 @@ function collectOddoIdentifiers(node, names = new Set()) {
     return names;
   }
 
+  // Special handling for object properties - key is not a reference unless computed
+  if (node.type === 'property') {
+    if (node.computed && node.key) {
+      collectOddoIdentifiers(node.key, names);
+    }
+    if (node.value) {
+      collectOddoIdentifiers(node.value, names);
+    }
+    return names;
+  }
+
   // Recursively traverse all object properties
   for (const key of Object.keys(node)) {
     if (key === 'type') continue;
@@ -1399,6 +1410,17 @@ function collectOddoIdentifiersOnly(node, names = new Set()) {
 
   if (node.type === 'identifier') {
     names.add(node.name);
+  }
+
+  // Special handling for object properties - key is not a reference unless computed
+  if (node.type === 'property') {
+    if (node.computed && node.key) {
+      collectOddoIdentifiersOnly(node.key, names);
+    }
+    if (node.value) {
+      collectOddoIdentifiersOnly(node.value, names);
+    }
+    return Array.from(names);
   }
 
   for (const key of Object.keys(node)) {
