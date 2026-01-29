@@ -1,4 +1,4 @@
-import { lift, reactiveSymbol, computed } from "./reactive.mjs";
+import { lift, reactiveSymbol, computed, createAccessor } from "./reactive.mjs";
 import { createAttributes } from "./attrs.mjs";
 
 const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
@@ -18,8 +18,9 @@ export const createElement = (tag, attrs, ...children) => () =>
     : createAttributes(attrs)
   }>${children.map(render).join("")}</${tag}>`
 
-export const createComponent = (component, props, ...children) => () => {
+export const createComponent = (component, attrs, ...children) => () => {
   // const initializers = []
+  const props = createAccessor(attrs?.[reactiveSymbol] ? attrs.get() : attrs)
   const expressionOrVdom = component.call({ onCleanup: noop, onMount: noop /* fn => initializers.push(fn) */ }, { props, children })
   return render(expressionOrVdom)
 }

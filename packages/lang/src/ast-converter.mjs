@@ -2055,25 +2055,12 @@ function convertJSXChildren(childrenCST) {
   for (let i = 0; i < childrenWithOffsets.length; i++) {
     const current = childrenWithOffsets[i];
     
-    // Check for whitespace gap BEFORE this child (after previous child)
-    if (i > 0 && sourceText) {
-      const prev = childrenWithOffsets[i - 1];
-      const gapStart = prev.lastOffset + 1;
-      const gapEnd = current.firstOffset;
-      
-      if (gapEnd > gapStart) {
-        // There's a gap - extract whitespace from source
-        const gap = sourceText.slice(gapStart, gapEnd);
-        // Only add if it contains actual whitespace (not empty)
-        if (gap && /\s/.test(gap)) {
-          // Normalize multiple whitespace to single space for cleaner output
-          result.push({ type: 'jsxText', value: ' ' });
-        }
-      }
-    }
+    // Calculate boundaries for text extraction (to preserve leading/trailing whitespace)
+    const prevEnd = i > 0 ? childrenWithOffsets[i - 1].lastOffset + 1 : undefined;
+    const nextStart = childrenWithOffsets[i + 1]?.firstOffset;
     
-    // Convert the child itself
-    const converted = convertJSXChild(current.cst);
+    // Convert the child, passing boundaries for text whitespace preservation
+    const converted = convertJSXChild(current.cst, prevEnd, nextStart);
     if (converted !== null) {
       result.push(converted);
     }
@@ -2119,7 +2106,7 @@ function getLastTokenOffset(node) {
   return lastOffset;
 }
 
-function convertJSXChild(cst) {
+function convertJSXChild(cst, startBoundary, endBoundary) {
   if (cst.children.jsxElement) {
     return convertJSXElement(getFirstChild(cst, 'jsxElement'));
   }
@@ -2134,14 +2121,13 @@ function convertJSXChild(cst) {
       return null;
     }
     const expression = convertExpression(expressionCST);
-  return {
+    return {
       type: 'jsxExpression',
       expression,
     };
   }
-  // JSX text: collect ALL tokens from the CST and concatenate their images
-  // Since we now consume ANY token type, we need to collect all children that aren't
-  // jsxElement or LeftBrace (which are handled above)
+  
+  // JSX text: collect tokens first to get offset info
   const allTokens = [];
 
   // Iterate through all children of the CST node
@@ -2164,9 +2150,33 @@ function convertJSXChild(cst) {
   if (allTokens.length > 0) {
     // Sort tokens by position to maintain order
     allTokens.sort((a, b) => a.offset - b.offset);
+    
+    const firstToken = allTokens[0];
+    const lastToken = allTokens[allTokens.length - 1];
+    const lastTokenEnd = lastToken.token.endOffset !== undefined
+      ? lastToken.token.endOffset
+      : lastToken.token.startOffset + lastToken.token.image.length - 1;
+    
+    // Use sourceText with boundaries to preserve leading/trailing whitespace
+    // startBoundary: previous sibling's end (to capture leading whitespace)
+    // endBoundary: next sibling's start (to capture trailing whitespace)
+    if (sourceText && (startBoundary !== undefined || endBoundary !== undefined)) {
+      // Use startBoundary if provided, otherwise use first token's start
+      const textStart = startBoundary ?? firstToken.offset;
+      // Use endBoundary if provided, otherwise use last token's end + 1
+      const textEnd = endBoundary ?? (lastTokenEnd + 1);
+      const textValue = sourceText.slice(textStart, textEnd);
+      if (textValue) {
+        const decodedValue = decodeHTMLEntities(textValue);
+        return {
+          type: 'jsxText',
+          value: decodedValue,
+        };
+      }
+      return null;
+    }
 
-    // Concatenate token images, preserving whitespace between tokens
-    // When the lexer skips whitespace, we need to detect gaps and insert spaces
+    // Fallback: concatenate token images (when sourceText/boundaries not available)
     let textValue = '';
     for (let i = 0; i < allTokens.length; i++) {
       const current = allTokens[i];
@@ -2190,7 +2200,7 @@ function convertJSXChild(cst) {
 
     // Decode HTML entities
     const decodedValue = decodeHTMLEntities(textValue);
-  return {
+    return {
       type: 'jsxText',
       value: decodedValue,
     };

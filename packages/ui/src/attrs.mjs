@@ -86,7 +86,7 @@ const removeAttribute = (element, key) => {
 const patchStyle = (element, oldStyle = {}, newStyle = {}) => {
   for (const prop in oldStyle) {
     if (!(prop in newStyle)) {
-      element.style[prop] = null;
+      element.style[prop] = null; // TODO: Handle reactive
     }
   }
   for (const prop in newStyle) {

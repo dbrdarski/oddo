@@ -7,6 +7,7 @@
 - implement @callback (or with different name) modifier (not needed)
 - implement ref attrs (ok)
 - implement router (ok - initial)
+- fix component props for reactivity (Proxy)
 - implement stores 
 
 - add syntax highlighting (for web (ok), for VS code (not yet), for Zed (not yet))
@@ -28,3 +29,8 @@
 
 - atts-minus => "attrs-minus": 
 - remove trimming on JSX text (ok)
+- add Regexes
+
+- Avoided destructuring in .map() callbacks (compiler bug)
+- Used direct property access: x.data.name instead of { data: { name } }
+- SSR createFragment children.map() issue

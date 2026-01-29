@@ -113,8 +113,20 @@ function wrapDependenciesWithCalls(arrowFunc, deps) {
         return;
       }
       const parent = path.parent;
+      // Skip binding positions (destructuring patterns, variable declarations)
+      // These are LVal positions where we can't replace with CallExpression
+      if (t.isObjectPattern(parent) || t.isArrayPattern(parent)) {
+        return;
+      }
+      if (t.isVariableDeclarator(parent) && parent.id === path.node) {
+        return;
+      }
+      // Skip if inside a destructuring pattern (check grandparent for nested patterns)
+      if (t.isObjectProperty(parent) && t.isObjectPattern(path.parentPath?.parent)) {
+        return;
+      }
       // Skip member expression properties (non-computed)
-      const isMemberProp = t.isMemberExpression(parent) && parent.property === path.node && !parent.computed;
+      const isMemberProp = (t.isMemberExpression(parent) || t.isOptionalMemberExpression(parent)) && parent.property === path.node && !parent.computed;
       // Skip object property keys (non-shorthand)
       const isObjectKey = t.isObjectProperty(parent) && parent.key === path.node && !parent.shorthand;
       // Handle shorthand properties specially: { c } -> { c: c() }
@@ -202,7 +214,8 @@ function createLiftedExpr(valueExpr, identifiers) {
 
 // Create a reactive expression call: _x((deps...) => expr with deps(), [deps...])
 function createReactiveExpr(valueExpr, attrExpression = false) {
-  const identifiers = extractIdentifiers(valueExpr);
+  const allIdentifiers = extractIdentifiers(valueExpr);
+  const identifiers = getReactiveDeps(allIdentifiers);
   const pragma = attrExpression ? 'computed' : 'x'
 
   if (identifiers.length === 0) {
@@ -269,7 +282,8 @@ const MODIFIER_TRANSFORMATIONS = {
     needsImport: true,
     // @computed sum = x + y -> const sum = _computed((x, y) => x() + y(), [x, y])
     transform: (valueExpr, leftExpr) => {
-      const identifiers = extractIdentifiers(valueExpr);
+      const allIds = extractIdentifiers(valueExpr);
+      const identifiers = getReactiveDeps(allIds);
       const params = identifiers.map(id => t.identifier(id));
       const deps = identifiers.map(id => t.identifier(id));
 
@@ -296,7 +310,8 @@ const MODIFIER_TRANSFORMATIONS = {
     needsImport: true,
     // @react sum = x + y -> const sum = _react((x, y) => x() + y(), [x, y])
     transform: (valueExpr, leftExpr) => {
-      const identifiers = extractIdentifiers(valueExpr);
+      const allIds = extractIdentifiers(valueExpr);
+      const identifiers = getReactiveDeps(allIds);
       const params = identifiers.map(id => t.identifier(id));
       const deps = identifiers.map(id => t.identifier(id));
 
@@ -425,7 +440,7 @@ const MODIFIER_TRANSFORMATIONS = {
           noScope: true,
           Identifier(path) {
             const parent = path.parent;
-            const isMemberProp = t.isMemberExpression(parent) && parent.property === path.node && !parent.computed;
+            const isMemberProp = (t.isMemberExpression(parent) || t.isOptionalMemberExpression(parent)) && parent.property === path.node && !parent.computed;
             const isObjectKey = t.isObjectProperty(parent) && parent.key === path.node && !parent.shorthand;
             const isShorthand = t.isObjectProperty(parent) && parent.shorthand && parent.key === path.node;
 
@@ -627,9 +642,9 @@ let mutableVariables = new Set();
 let moduleScope = null;
 let currentScope = null;
 
-// Variable info structure: { type: 'state'|'computed'|'mutable'|'immutable'|'param', reactive: boolean }
+// Variable info structure: { type: 'state'|'computed'|'mutable'|'immutable'|'param'|'import-oddo'|'import-js', reactive: boolean }
 function declareVariable(name, type) {
-  const reactive = (type === 'state' || type === 'computed' || type === 'param');
+  const reactive = (type === 'state' || type === 'computed' || type === 'param' || type === 'import-oddo');
   currentScope[name] = { type, reactive };
 }
 
@@ -729,6 +744,25 @@ function collectOddoIdentifiers(node, names = new Set()) {
         declareVariable(varName, 'immutable');
       }
       // Other modifiers (effect, mutate, react) don't declare named variables in the same way
+    }
+  }
+
+  // Handle import statements - track imported names with reactivity based on file extension
+  if (node.type === 'importStatement') {
+    const source = node.source || '';
+    const isOddoImport = source.endsWith('.oddo');
+    const type = isOddoImport ? 'import-oddo' : 'import-js';
+    
+    // Default import: import Btn from "..."
+    if (node.defaultImport) {
+      declareVariable(node.defaultImport, type);
+    }
+    // Named imports: import { x, y } from "..."
+    for (const spec of node.specifiers || []) {
+      const localName = spec.local || spec.imported;
+      if (localName) {
+        declareVariable(localName, type);
+      }
     }
   }
   

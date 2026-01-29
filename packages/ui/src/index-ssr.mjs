@@ -10,6 +10,8 @@ export {
 } from "./reactive.mjs"
 
 export const effect = () => {}
+export const mount = () => {}
+export const hydrate = () => {}
 
 export {
   createElement,

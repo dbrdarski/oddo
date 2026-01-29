@@ -16,8 +16,8 @@ export const withSSR = (app) => (path) => {
 
 let navigate = null
 
-export const Router = ({ props: { routes }}) => {
-  const router = new UrlRouter(lift((routes) => routes(), [routes]))
+export const Router = ({ props: { routes, ...props } }) => {
+  const router = new UrlRouter(routes())
   const isSSR = typeof window === "undefined"
   const url = isSSR ? ssrPath : window.location.pathname + window.location.search
   const initialRoute = router.find(url)

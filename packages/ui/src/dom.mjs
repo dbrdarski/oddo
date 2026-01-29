@@ -1,5 +1,5 @@
 import { patchAttributes } from "./attrs.mjs"
-import { observable, reactiveSymbol, effect2, computed } from "./reactive.mjs"
+import { observable, reactiveSymbol, effect2, computed, createAccessor } from "./reactive.mjs"
 
 const emptyObject = {}
 
@@ -70,11 +70,12 @@ export const createElement = (tag, attrs, ...children) => (parent, oldNodeCleanu
   }
 }
 
-export const createComponent = (component, props, ...children) => (parent, oldNodeCleanup) => {
+export const createComponent = (component, attrs, ...children) => (parent, oldNodeCleanup) => {
   const initializers = []
   const { dispose, subscribe, onCleanup } = cleanupContext(currentContext)
   const prevContext = currentContext
   currentContext = subscribe
+  const props = createAccessor(attrs?.[reactiveSymbol] ? attrs.get() : attrs)
   const expressionOrVdom = component.call({ onCleanup, onMount: fn => initializers.push(fn) }, { props, children })
   const nodeCleanup = render(expressionOrVdom)(parent, oldNodeCleanup)
   currentContext = prevContext
@@ -139,8 +140,7 @@ export const hydrate = (root, jsx) => {
 let walk
 const domWalker = children => {
   let cursor = 0
-  console.log("NEW WALKER", { cursor, children })
-  return () => log(children[cursor++], {cursor, children})
+  return () => children[cursor++]
 }
 
-const log = (item, ...args) => (console.log({ item }, ...args), item)
+// const log = (item, ...args) => (console.log({ item }, ...args), item)

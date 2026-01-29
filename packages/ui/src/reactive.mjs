@@ -91,6 +91,15 @@ export const stateProxy = (target, mutable, notifyParent) => {
       apply () {
         return target = mutate(mutable)
       },
+      deleteProperty (_, key) {
+  			if (record.hasOwnProperty(key)) {
+   				target = mutate()
+  				delete target[key]
+          delete children[key]
+          children.has(key) && children.delete(key)
+          mutable || notifyParent?.(target)
+  			}
+  		},
       set (_, key, value) {
         if (record.hasOwnProperty(prop) && target[key] === value) return false
         if (children.has(key) && !(value && typeof value === "object")) {
@@ -104,10 +113,33 @@ export const stateProxy = (target, mutable, notifyParent) => {
       get (_, key) {
         const value = Reflect.get(target, key, target)
         if (!children.has(key)) {
-          children.set(stateProxy(value, mutable, (value) => {
+          children.set(key, stateProxy(value, mutable, (value) => {
             target = mutate()
             target[key] = value
           }))
+        }
+        return children.get(key)
+      }
+    })
+  }
+  return () => target
+}
+
+export const createAccessor = (target) => {
+  if (target && typeof target === "object") {
+    const children = new Map()
+    return new Proxy(noop, {
+      apply () {
+        return target
+      },
+      deleteProperty () {},
+      set () {
+        return false
+      },
+      get (_, key) {
+        const value = Reflect.get(target, key, target)
+        if (!children.has(key)) {
+          children.set(key, createAccessor(value?.[reactiveSymbol] ? value.get() : value))
         }
         return children.get(key)
       }
