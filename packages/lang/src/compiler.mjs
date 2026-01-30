@@ -1384,8 +1384,8 @@ function convertArrowFunction(expr) {
   // Restore parent scope
   currentScope = savedScope;
 
-  // If there are reactive deps, wrap with _liftFn
-  if (reactiveDepsForBody.length > 0) {
+  // If there are reactive deps or params, wrap with _liftFn
+  if (reactiveDepsForBody.length > 0 || params.length > 0) {
     usedModifiers.add('liftFn');
     
     // Prepend reactive dep params to original params

@@ -111,8 +111,9 @@ export const stateProxy = (target, mutable, notifyParent) => {
         return true
       },
       get (_, key) {
-        const value = Reflect.get(target, key, target)
         if (!children.has(key)) {
+          const propertyValue = Reflect.get(target, key, target)
+          const value = (!target.hasOwnProperty(key) && typeof propertyValue === "function") ? propertyValue.bind(target) : propertyValue
           children.set(key, stateProxy(value, mutable, (value) => {
             target = mutate()
             target[key] = value
@@ -137,8 +138,9 @@ export const createAccessor = (target) => {
         return false
       },
       get (_, key) {
-        const value = Reflect.get(target, key, target)
         if (!children.has(key)) {
+          const propertyValue = Reflect.get(target, key, target)
+          const value = (!target.hasOwnProperty(key) && typeof propertyValue === "function") ? propertyValue.bind(target) : propertyValue
           children.set(key, createAccessor(value?.[reactiveSymbol] ? value.get() : value))
         }
         return children.get(key)
