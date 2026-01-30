@@ -1,0 +1,279 @@
+
+============================================================
+PART 1: STANDALONE SCENARIOS
+============================================================
+
+============================================================
+SCENARIO: 1. @state
+------------------------------------------------------------
+ODDO:
+@state count = 0
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state } from "@oddo/ui";
+const [count, setCount] = _state(0);
+
+============================================================
+SCENARIO: 2. @computed
+------------------------------------------------------------
+ODDO:
+@state count = 0
+@computed doubled = count * 2
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, computed as _computed } from "@oddo/ui";
+const [count, setCount] = _state(0);
+const doubled = _computed(count => count() * 2, [count]);
+
+============================================================
+SCENARIO: 3. @effect
+------------------------------------------------------------
+ODDO:
+@state count = 0
+@effect () => { console.log(count) }
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, effect as _effect } from "@oddo/ui";
+const [count, setCount] = _state(0);
+_effect(count => {
+  console.log(count());
+}, [count]);
+
+============================================================
+SCENARIO: 4. @mutate
+------------------------------------------------------------
+ODDO:
+@state count = 0
+@mutate increment = () => { count := count + 1 }
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, mutate as _mutate, stateProxy as _stateProxy } from "@oddo/ui";
+const [count, setCount] = _state(0);
+const increment = _mutate((finalizer, count) => {
+  count = _stateProxy(count() + 1);
+  finalizer(count());
+}, count => setCount(count), [count], []);
+
+============================================================
+SCENARIO: 5. @mutable
+------------------------------------------------------------
+ODDO:
+@state count = 0
+@mutable temp = count + 1
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, lift as _lift } from "@oddo/ui";
+const [count, setCount] = _state(0);
+let temp = _lift(count => count + 1, [count]);
+
+============================================================
+SCENARIO: 6. Regular variable WITH reactive deps
+------------------------------------------------------------
+ODDO:
+@state count = 0
+doubled = count * 2
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, lift as _lift } from "@oddo/ui";
+const [count, setCount] = _state(0);
+const doubled = _lift(count => count * 2, [count]);
+
+============================================================
+SCENARIO: 7. Regular variable WITHOUT reactive deps
+------------------------------------------------------------
+ODDO:
+x = 5
+------------------------------------------------------------
+COMPILED JS:
+const x = 5;
+
+============================================================
+SCENARIO: 8. Callback function WITHOUT reactive deps
+------------------------------------------------------------
+ODDO:
+fn = (a, b) => a + b
+------------------------------------------------------------
+COMPILED JS:
+import { liftFn as _liftFn } from "@oddo/ui";
+const fn = _liftFn((a, b) => a + b, []);
+
+============================================================
+SCENARIO: 9. Callback function WITH reactive deps
+------------------------------------------------------------
+ODDO:
+@state count = 0
+fn = (a) => a + count
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, liftFn as _liftFn } from "@oddo/ui";
+const [count, setCount] = _state(0);
+const fn = _liftFn((count, a) => a + count, [count]);
+
+
+============================================================
+PART 2: SAME SCENARIOS WRAPPED IN A COMPONENT FUNCTION
+============================================================
+
+============================================================
+SCENARIO: 1. @state in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  @state count = 0
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state } from "@oddo/ui";
+const Component = () => {
+  const [count, setCount] = _state(0);
+  return null;
+};
+
+============================================================
+SCENARIO: 2. @computed in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  @state count = 0
+  @computed doubled = count * 2
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, computed as _computed } from "@oddo/ui";
+const Component = () => {
+  const [count, setCount] = _state(0);
+  const doubled = _computed(count => count() * 2, [count]);
+  return null;
+};
+
+============================================================
+SCENARIO: 3. @effect in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  @state count = 0
+  @effect () => { console.log(count) }
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, effect as _effect } from "@oddo/ui";
+const Component = () => {
+  const [count, setCount] = _state(0);
+  _effect(count => {
+    console.log(count());
+  }, [count]);
+  return null;
+};
+
+============================================================
+SCENARIO: 4. @mutate in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  @state count = 0
+  @mutate increment = () => { count := count + 1 }
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, mutate as _mutate, stateProxy as _stateProxy } from "@oddo/ui";
+const Component = () => {
+  const [count, setCount] = _state(0);
+  const increment = _mutate((finalizer, count) => {
+    count = _stateProxy(count() + 1);
+    finalizer(count());
+  }, count => setCount(count), [count], []);
+  return null;
+};
+
+============================================================
+SCENARIO: 5. @mutable in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  @state count = 0
+  @mutable temp = count + 1
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, lift as _lift } from "@oddo/ui";
+const Component = () => {
+  const [count, setCount] = _state(0);
+  let temp = _lift(count => count + 1, [count]);
+  return null;
+};
+
+============================================================
+SCENARIO: 6. Regular variable WITH reactive deps in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  @state count = 0
+  doubled = count * 2
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, lift as _lift } from "@oddo/ui";
+const Component = () => {
+  const [count, setCount] = _state(0);
+  const doubled = _lift(count => count * 2, [count]);
+  return null;
+};
+
+============================================================
+SCENARIO: 7. Regular variable WITHOUT reactive deps in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  x = 5
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+const Component = () => {
+  const x = 5;
+  return null;
+};
+
+============================================================
+SCENARIO: 8. Callback function WITHOUT reactive deps in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  fn = (a, b) => a + b
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+import { liftFn as _liftFn } from "@oddo/ui";
+const Component = () => {
+  const fn = _liftFn((a, b) => a + b, []);
+  return null;
+};
+
+============================================================
+SCENARIO: 9. Callback function WITH reactive deps in component
+------------------------------------------------------------
+ODDO:
+Component = () => {
+  @state count = 0
+  fn = (a) => a + count
+  return null
+}
+------------------------------------------------------------
+COMPILED JS:
+import { state as _state, liftFn as _liftFn } from "@oddo/ui";
+const Component = () => {
+  const [count, setCount] = _state(0);
+  const fn = _liftFn((count, a) => a + count, [count]);
+  return null;
+};
+
+============================================================
+DIAGNOSTIC COMPLETE
+============================================================

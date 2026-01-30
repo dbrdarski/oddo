@@ -15,76 +15,6 @@ function isValidJSIdentifier(name) {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name);
 }
 
-// Helper function to extract identifiers from a Babel AST expression
-function extractIdentifiers(babelNode) {
-  const identifiers = new Set();
-  const locals = new Set(); // Track locally bound identifiers
-
-  function traverse(node) {
-    if (!node) return;
-
-    if (t.isIdentifier(node)) {
-      // Skip local bindings and internal placeholders
-      if (!locals.has(node.name) && !node.name.startsWith('__ODDO_IMPORT_')) {
-        identifiers.add(node.name);
-      }
-    } else if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
-      traverse(node.object);
-      if (node.computed) traverse(node.property);
-    } else if (t.isCallExpression(node) || t.isOptionalCallExpression(node)) {
-      traverse(node.callee);
-      node.arguments?.forEach(arg => traverse(arg));
-    } else if (t.isBinaryExpression(node) || t.isLogicalExpression(node)) {
-      traverse(node.left);
-      traverse(node.right);
-    } else if (t.isUnaryExpression(node)) {
-      traverse(node.argument);
-    } else if (t.isConditionalExpression(node)) {
-      traverse(node.test);
-      traverse(node.consequent);
-      traverse(node.alternate);
-    } else if (t.isArrayExpression(node)) {
-      node.elements?.forEach(el => traverse(el));
-    } else if (t.isObjectExpression(node)) {
-      node.properties?.forEach(prop => {
-        if (t.isObjectProperty(prop)) {
-          if (prop.computed) traverse(prop.key);
-          traverse(prop.value);
-        } else if (t.isSpreadElement(prop)) {
-          traverse(prop.argument);
-        }
-      });
-    } else if (t.isArrowFunctionExpression(node)) {
-      // Collect params as locals, then traverse body
-      node.params.forEach(p => {
-        if (t.isIdentifier(p)) locals.add(p.name);
-        else if (t.isObjectPattern(p)) p.properties.forEach(prop => t.isIdentifier(prop.value) && locals.add(prop.value.name));
-        else if (t.isArrayPattern(p)) p.elements?.forEach(el => t.isIdentifier(el) && locals.add(el.name));
-      });
-      if (t.isBlockStatement(node.body)) node.body.body.forEach(s => traverse(s));
-      else traverse(node.body);
-    } else if (t.isBlockStatement(node)) {
-      node.body.forEach(s => traverse(s));
-    } else if (t.isExpressionStatement(node)) {
-      traverse(node.expression);
-    } else if (t.isReturnStatement(node)) {
-      traverse(node.argument);
-    } else if (t.isSequenceExpression(node)) {
-      node.expressions.forEach(expr => traverse(expr));
-    } else if (t.isUpdateExpression(node)) {
-      traverse(node.argument);
-    } else if (t.isAssignmentExpression(node)) {
-      traverse(node.left);
-      traverse(node.right);
-    } else if (t.isSpreadElement(node)) {
-      traverse(node.argument);
-    }
-  }
-
-  traverse(babelNode);
-  return Array.from(identifiers);
-}
-
 // Wrap dependency references with call expressions: x -> x()
 function wrapDependenciesWithCalls(arrowFunc, deps) {
   const depSet = new Set(deps);
@@ -213,9 +143,13 @@ function createLiftedExpr(valueExpr, identifiers) {
 }
 
 // Create a reactive expression call: _x((deps...) => expr with deps(), [deps...])
-function createReactiveExpr(valueExpr, attrExpression = false) {
-  const allIdentifiers = extractIdentifiers(valueExpr);
-  const identifiers = getReactiveDeps(allIdentifiers);
+// oddoExpr: Oddo AST to extract identifiers from
+// valueExpr: Babel AST for the expression
+// attrExpression: whether this is for a JSX attribute (uses 'computed' pragma)
+function createReactiveExpr(oddoExpr, valueExpr, attrExpression = false) {
+  // Extract identifiers from Oddo AST and filter to reactive ones
+  const allIdentifiers = collectOddoIdentifiersOnly(oddoExpr);
+  const identifiers = allIdentifiers.filter(id => isReactive(id));
   const pragma = attrExpression ? 'computed' : 'x'
 
   if (identifiers.length === 0) {
@@ -281,9 +215,15 @@ const MODIFIER_TRANSFORMATIONS = {
   computed: {
     needsImport: true,
     // @computed sum = x + y -> const sum = _computed((x, y) => x() + y(), [x, y])
-    transform: (valueExpr, leftExpr) => {
-      const allIds = extractIdentifiers(valueExpr);
-      const identifiers = getReactiveDeps(allIds);
+    // Receives Oddo AST, extracts deps from Oddo, converts internally
+    transform: (oddoExpr, leftExpr) => {
+      // Extract reactive deps from Oddo AST
+      const allIds = collectOddoIdentifiersOnly(oddoExpr);
+      const identifiers = allIds.filter(id => isReactive(id));
+      
+      // Convert Oddo AST to Babel AST
+      const valueExpr = convertExpression(oddoExpr);
+      
       const params = identifiers.map(id => t.identifier(id));
       const deps = identifiers.map(id => t.identifier(id));
 
@@ -304,33 +244,6 @@ const MODIFIER_TRANSFORMATIONS = {
         ]);
       }
       return t.expressionStatement(computedCall);
-    },
-  },
-  react: {
-    needsImport: true,
-    // @react sum = x + y -> const sum = _react((x, y) => x() + y(), [x, y])
-    transform: (valueExpr, leftExpr) => {
-      const allIds = extractIdentifiers(valueExpr);
-      const identifiers = getReactiveDeps(allIds);
-      const params = identifiers.map(id => t.identifier(id));
-      const deps = identifiers.map(id => t.identifier(id));
-
-      const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
-
-      // Wrap dependency references with call expressions
-      wrapDependenciesWithCalls(arrowFunc, identifiers);
-
-      const reactCall = t.callExpression(
-        t.identifier(modifierAliases['react']),
-        [arrowFunc, t.arrayExpression(deps)]
-      );
-
-      if (leftExpr) {
-        return t.variableDeclaration('const', [
-          t.variableDeclarator(leftExpr, reactCall)
-        ]);
-      }
-      return t.expressionStatement(reactCall);
     },
   },
   mutate: {
@@ -606,21 +519,65 @@ const MODIFIER_TRANSFORMATIONS = {
     needsImport: false,
     // @mutable x = 3 -> let x = 3;
     // @mutable x = y + 1 (y is @state) -> let x = _lift((y) => y() + 1, [y])
-    transform: (valueExpr, leftExpr) => {
+    // Receives Oddo AST, extracts deps from Oddo, converts internally
+    transform: (oddoExpr, leftExpr) => {
       if (leftExpr && t.isIdentifier(leftExpr)) {
         // Track this as a mutable variable for @mutate validation
         mutableVariables.add(leftExpr.name);
         
+        // Extract identifiers from Oddo AST
+        const identifiers = collectOddoIdentifiersOnly(oddoExpr);
+        
+        // Convert Oddo AST to Babel AST
+        const valueExpr = convertExpression(oddoExpr);
+        
         // Check if expression contains reactive dependencies
-        const identifiers = extractIdentifiers(valueExpr);
         const liftedExpr = createLiftedExpr(valueExpr, identifiers);
         
         return t.variableDeclaration('let', [
           t.variableDeclarator(leftExpr, liftedExpr || valueExpr)
         ]);
       }
-      // If no left side, just return the expression
-      return t.expressionStatement(valueExpr);
+      // If no left side, just return the expression (convert from Oddo)
+      return t.expressionStatement(convertExpression(oddoExpr));
+    },
+  },
+  component: {
+    needsImport: false,
+    // @component Counter = (props) => { ... } -> const Counter = function(props) { ... }
+    // Parameters are treated as reactive, no _liftFn wrapping, compiles to regular function
+    transform: (oddoExpr, leftExpr) => {
+      if (oddoExpr.type !== 'arrowFunction') {
+        throw new Error('@component modifier must be applied to an arrow function');
+      }
+
+      const funcExpr = convertReactiveContainer(oddoExpr);
+
+      if (leftExpr && t.isIdentifier(leftExpr)) {
+        return t.variableDeclaration('const', [
+          t.variableDeclarator(leftExpr, funcExpr)
+        ]);
+      }
+      return t.expressionStatement(funcExpr);
+    },
+  },
+  hook: {
+    needsImport: false,
+    // @hook useCounter = (initial) => { ... } -> const useCounter = function(initial) { ... }
+    // Parameters are treated as reactive, no _liftFn wrapping, compiles to regular function
+    transform: (oddoExpr, leftExpr) => {
+      if (oddoExpr.type !== 'arrowFunction') {
+        throw new Error('@hook modifier must be applied to an arrow function');
+      }
+
+      const funcExpr = convertReactiveContainer(oddoExpr);
+
+      if (leftExpr && t.isIdentifier(leftExpr)) {
+        return t.variableDeclaration('const', [
+          t.variableDeclarator(leftExpr, funcExpr)
+        ]);
+      }
+      return t.expressionStatement(funcExpr);
     },
   },
 };
@@ -861,7 +818,7 @@ export function compileToJS(ast, config = {}) {
   // Modifiers: state, computed, react, mutate, effect
   // JSX Pragmas: e (element), c (component), x (expression), f (fragment)
   // Helpers: stateProxy
-  const allImports = ['state', 'computed', 'react', 'mutate', 'effect', 'stateProxy', 'lift', 'liftFn', 'e', 'c', 'x', 'f'];
+  const allImports = ['state', 'computed', 'mutate', 'effect', 'stateProxy', 'lift', 'liftFn', 'e', 'c', 'x', 'f'];
   for (const name of allImports) {
     modifierAliases[name] = `__ODDO_IMPORT_${name}__`;
   }
@@ -999,15 +956,15 @@ function convertExpressionStatement(stmt) {
       // If it's a declaration (=) or assignment (:=), extract both left and right sides
       if (stmt.expression.type === 'variableDeclaration' || stmt.expression.type === 'assignment') {
         leftExpr = convertExpression(stmt.expression.left);
-        // For mutate/effect modifier, pass original Oddo AST for special processing
-        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect') {
+        // For modifiers that need Oddo AST, pass original Oddo AST for special processing
+        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook') {
           valueExpr = stmt.expression.right; // Oddo AST, not converted
         } else {
           valueExpr = convertExpression(stmt.expression.right);
         }
       } else {
         // Otherwise, use the expression itself as the value
-        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect') {
+        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook') {
           valueExpr = stmt.expression; // Oddo AST, not converted
         } else {
           valueExpr = convertExpression(stmt.expression);
@@ -1047,15 +1004,15 @@ function convertExpressionStatement(stmt) {
           // If it's a declaration (=) or assignment (:=), extract both left and right sides
           if (blockStmt.expression.type === 'variableDeclaration' || blockStmt.expression.type === 'assignment') {
             leftExpr = convertExpression(blockStmt.expression.left);
-            // For mutate/effect, pass raw Oddo AST (they need to analyze function body)
-            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect') {
+            // For modifiers that need Oddo AST, pass raw Oddo AST (they extract deps from Oddo)
+            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook') {
               valueExpr = blockStmt.expression.right;  // Oddo AST
             } else {
               valueExpr = convertExpression(blockStmt.expression.right);  // Babel AST
             }
           } else {
             // Otherwise, use the expression itself as the value
-            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect') {
+            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook') {
               valueExpr = blockStmt.expression;  // Oddo AST
             } else {
               valueExpr = convertExpression(blockStmt.expression);  // Babel AST
@@ -1087,16 +1044,26 @@ function convertExpressionStatement(stmt) {
   // Handle variable declaration before converting as expression
   if (stmt.expression && stmt.expression.type === 'variableDeclaration') {
     const left = convertExpression(stmt.expression.left);
-    const right = convertExpression(stmt.expression.right);
+    const oddoRight = stmt.expression.right;
+    
+    // Convert Oddo AST to Babel AST
+    const right = convertExpression(oddoRight);
     
     // Variable is already tracked in scope during pre-pass
     
     // Check if expression contains reactive dependencies
-    const identifiers = extractIdentifiers(right);
-    const liftedExpr = createLiftedExpr(right, identifiers);
+    // Skip lifting for arrow functions - they handle their own lifting via createArrowFunction
+    let finalExpr = right;
+    if (oddoRight.type !== 'arrowFunction') {
+      const identifiers = collectOddoIdentifiersOnly(oddoRight);
+      const liftedExpr = createLiftedExpr(right, identifiers);
+      if (liftedExpr) {
+        finalExpr = liftedExpr;
+      }
+    }
     
     return t.variableDeclaration('const', [
-      t.variableDeclarator(left, liftedExpr || right)
+      t.variableDeclarator(left, finalExpr)
     ]);
   }
 
@@ -1402,6 +1369,78 @@ function convertArrowFunction(expr) {
   }
 
   return t.arrowFunctionExpression(params, body);
+}
+
+/**
+ * Convert an Oddo arrow function to a reactive container (for @component and @hook)
+ * - Compiles to a regular JS function (not arrow function)
+ * - NO _liftFn wrapping
+ * - Parameters are treated as reactive inside the body
+ * - Body reactivity works normally (@state, @computed, etc.)
+ */
+function convertReactiveContainer(expr) {
+  // Switch to this function's scope (created during pre-pass)
+  const savedScope = currentScope;
+  if (expr._scope) {
+    currentScope = expr._scope;
+  } else {
+    // Create a new scope for this container
+    currentScope = Object.create(savedScope);
+  }
+  
+  // Mark all parameters as reactive in scope
+  for (const param of (expr.parameters || [])) {
+    if (param.name) {
+      currentScope[param.name] = { type: 'param', reactive: true };
+    } else if (param.type === 'destructuringPattern') {
+      const boundNames = extractBoundNames(param.pattern);
+      for (const name of boundNames) {
+        currentScope[name] = { type: 'param', reactive: true };
+      }
+    } else if (param.type === 'restElement' && param.argument?.name) {
+      currentScope[param.argument.name] = { type: 'param', reactive: true };
+    }
+  }
+  
+  // Convert parameters
+  const params = (expr.parameters || []).map(param => {
+    if (param.type === 'restElement') {
+      return t.restElement(convertExpression(param.argument));
+    }
+    if (param.type === 'destructuringPattern') {
+      const pattern = convertExpression(param.pattern);
+      if (param.default) {
+        return t.assignmentPattern(pattern, convertExpression(param.default));
+      }
+      return pattern;
+    }
+    if (param.type === 'parameter') {
+      const paramId = t.identifier(param.name);
+      if (param.default) {
+        return t.assignmentPattern(paramId, convertExpression(param.default));
+      }
+      return paramId;
+    }
+    return convertExpression(param);
+  });
+
+  // Convert body
+  let body;
+  if (expr.body && expr.body.type === 'blockStatement') {
+    const statements = expr.body.body.map(stmt => convertStatement(stmt));
+    body = t.blockStatement(statements);
+  } else if (expr.body) {
+    // Expression body - wrap in return statement for function
+    body = t.blockStatement([t.returnStatement(convertExpression(expr.body))]);
+  } else {
+    body = t.blockStatement([]);
+  }
+
+  // Restore parent scope
+  currentScope = savedScope;
+
+  // Return a regular function expression (not arrow function, no _liftFn)
+  return t.functionExpression(null, params, body);
 }
 
 // Helper: collect identifiers from Oddo AST without side effects
@@ -1800,7 +1839,7 @@ function convertJSXChild(child) {
   } else if (child.type === 'jsxExpression') {
     // JSX expression: {expr} -> _x((deps) => expr(), [deps])
     const innerExpr = convertExpression(child.expression);
-    return createReactiveExpr(innerExpr);
+    return createReactiveExpr(child.expression, innerExpr);
   } else if (child.type === 'jsxElement') {
     return convertJSXElement(child);
   } else if (child.type === 'jsxFragment') {
@@ -1827,10 +1866,12 @@ function convertJSXElement(expr) {
     // With spread: wrap entire props object in _x()
     // _x((deps...) => ({ ...spread(), attr: value() }), [deps...])
     const properties = [];
+    const oddoExprs = []; // Collect Oddo AST for identifier extraction
 
     for (const attr of expr.attributes) {
       if (attr.type === 'jsxSpread') {
         properties.push(t.spreadElement(convertExpression(attr.expression)));
+        oddoExprs.push(attr.expression);
       } else {
         // Use string literal for keys with dashes or other non-identifier chars
         const key = isValidJSIdentifier(attr.name)
@@ -1843,15 +1884,19 @@ function convertJSXElement(expr) {
           value = t.stringLiteral(attr.value.value);
         } else if (attr.value.type === 'expression') {
           value = convertExpression(attr.value.value);
+          oddoExprs.push(attr.value.value);
         } else {
           value = convertExpression(attr.value);
+          oddoExprs.push(attr.value);
         }
         properties.push(t.objectProperty(key, value));
       }
     }
 
     const propsObj = t.objectExpression(properties);
-    propsArg = createReactiveExpr(propsObj, true);
+    // Create synthetic Oddo object for identifier collection
+    const syntheticOddo = { type: 'array', elements: oddoExprs };
+    propsArg = createReactiveExpr(syntheticOddo, propsObj, true);
   } else if (expr.attributes.length === 0) {
     // No attributes
     propsArg = t.nullLiteral();
@@ -1875,10 +1920,10 @@ function convertJSXElement(expr) {
       } else if (attr.value.type === 'expression') {
         // Expression: value={x} -> {value: _x((x) => x(), [x])}
         const innerExpr = convertExpression(attr.value.value);
-        value = createReactiveExpr(innerExpr, true);
+        value = createReactiveExpr(attr.value.value, innerExpr, true);
       } else {
         const innerExpr = convertExpression(attr.value);
-        value = createReactiveExpr(innerExpr, true);
+        value = createReactiveExpr(attr.value, innerExpr, true);
       }
 
       properties.push(t.objectProperty(key, value));
