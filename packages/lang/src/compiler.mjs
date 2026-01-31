@@ -221,8 +221,16 @@ const MODIFIER_TRANSFORMATIONS = {
       const allIds = collectOddoIdentifiersOnly(oddoExpr);
       const identifiers = allIds.filter(id => isReactive(id));
       
+      // Mark scope as non-reactive for nested functions (deps are unwrapped inside @computed)
+      const savedScope = currentScope;
+      currentScope = Object.create(currentScope);
+      currentScope[reactiveScope] = false;
+      
       // Convert Oddo AST to Babel AST
       const valueExpr = convertExpression(oddoExpr);
+      
+      // Restore scope
+      currentScope = savedScope;
       
       const params = identifiers.map(id => t.identifier(id));
       const deps = identifiers.map(id => t.identifier(id));
@@ -341,6 +349,11 @@ const MODIFIER_TRANSFORMATIONS = {
         ...outerDepsArray.filter(id => !mutableVariables.has(id))
       ]);
 
+      // Mark scope as non-reactive for nested functions (deps are unwrapped inside @mutate)
+      const savedScopeMutate = currentScope;
+      currentScope = Object.create(currentScope);
+      currentScope[reactiveScope] = false;
+
       for (const assignment of assignments) {
         // Convert right side to Babel AST
         const rightBabel = convertExpression(assignment.rightOddo);
@@ -402,6 +415,9 @@ const MODIFIER_TRANSFORMATIONS = {
           );
         }
       }
+
+      // Restore scope after processing assignments
+      currentScope = savedScopeMutate;
 
       // Add finalizer call only for state containers: finalizer(x1(), x2(), x3())
       if (stateContainerNames.length > 0) {
@@ -480,6 +496,7 @@ const MODIFIER_TRANSFORMATIONS = {
       // They will be called with () by wrapDependenciesWithCalls after conversion
       const savedScope = currentScope;
       currentScope = Object.create(currentScope);
+      currentScope[reactiveScope] = false; // Nested functions don't need _liftFn for params
       for (const id of identifiers) {
         currentScope[id] = { type: 'param', reactive: false };
       }
@@ -527,9 +544,22 @@ const MODIFIER_TRANSFORMATIONS = {
         
         // Extract identifiers from Oddo AST
         const identifiers = collectOddoIdentifiersOnly(oddoExpr);
+        const reactiveDeps = getReactiveDeps(identifiers);
+        
+        // Mark scope as non-reactive if there are reactive deps (will be lifted)
+        const savedScope = currentScope;
+        if (reactiveDeps.length > 0) {
+          currentScope = Object.create(currentScope);
+          currentScope[reactiveScope] = false;
+        }
         
         // Convert Oddo AST to Babel AST
         const valueExpr = convertExpression(oddoExpr);
+        
+        // Restore scope
+        if (reactiveDeps.length > 0) {
+          currentScope = savedScope;
+        }
         
         // Check if expression contains reactive dependencies
         const liftedExpr = createLiftedExpr(valueExpr, identifiers);
@@ -598,6 +628,10 @@ let mutableVariables = new Set();
 // Child scopes inherit from parent scopes via Object.create()
 let moduleScope = null;
 let currentScope = null;
+
+// Symbol to track whether current scope is "reactive" (functions could receive reactive values)
+// Root scope is reactive; scopes inside dependency-tracking contexts are non-reactive
+const reactiveScope = Symbol("reactive-scope");
 
 // Variable info structure: { type: 'state'|'computed'|'mutable'|'immutable'|'param'|'import-oddo'|'import-js', reactive: boolean }
 function declareVariable(name, type) {
@@ -679,6 +713,7 @@ function collectOddoIdentifiers(node, names = new Set()) {
   // Initialize module scope for program node
   if (node.type === 'program') {
     moduleScope = Object.create(null);
+    moduleScope[reactiveScope] = true; // Root scope is reactive
     currentScope = moduleScope;
   }
 
@@ -1046,20 +1081,35 @@ function convertExpressionStatement(stmt) {
     const left = convertExpression(stmt.expression.left);
     const oddoRight = stmt.expression.right;
     
-    // Convert Oddo AST to Babel AST
-    const right = convertExpression(oddoRight);
-    
     // Variable is already tracked in scope during pre-pass
     
     // Check if expression contains reactive dependencies
     // Skip lifting for arrow functions - they handle their own lifting via createArrowFunction
-    let finalExpr = right;
+    let finalExpr;
     if (oddoRight.type !== 'arrowFunction') {
       const identifiers = collectOddoIdentifiersOnly(oddoRight);
-      const liftedExpr = createLiftedExpr(right, identifiers);
-      if (liftedExpr) {
-        finalExpr = liftedExpr;
+      const reactiveDeps = getReactiveDeps(identifiers);
+      
+      // Mark scope as non-reactive if there are reactive deps (will be lifted)
+      const savedScope = currentScope;
+      if (reactiveDeps.length > 0) {
+        currentScope = Object.create(currentScope);
+        currentScope[reactiveScope] = false;
       }
+      
+      // Convert Oddo AST to Babel AST
+      const right = convertExpression(oddoRight);
+      
+      // Restore scope
+      if (reactiveDeps.length > 0) {
+        currentScope = savedScope;
+      }
+      
+      const liftedExpr = createLiftedExpr(right, identifiers);
+      finalExpr = liftedExpr || right;
+    } else {
+      // Arrow functions handle their own lifting
+      finalExpr = convertExpression(oddoRight);
     }
     
     return t.variableDeclaration('const', [
@@ -1293,10 +1343,14 @@ function convertArrowFunction(expr) {
     currentScope = expr._scope;
   }
   
+  // Check if we're in a reactive scope (where params could be called with reactive values)
+  const inReactiveScope = savedScope?.[reactiveScope] !== false;
+  
   // BEFORE converting body: find reactive deps that will be captured
   // These will become additional params via _liftFn, so treat them as non-reactive inside
+  // In non-reactive scopes, don't collect deps - they're already unwrapped by parent
   const bodyIdentifiers = collectOddoIdentifiersOnly(expr.body);
-  const reactiveDepsForBody = bodyIdentifiers.filter(id => {
+  const reactiveDepsForBody = inReactiveScope ? bodyIdentifiers.filter(id => {
     // Check if it's reactive in parent scope (not current function scope)
     // and not already a param of this function
     const isOwnParam = expr.parameters?.some(p => p.name === id);
@@ -1305,11 +1359,17 @@ function convertArrowFunction(expr) {
     // Check parent scope for reactivity
     const varInfo = savedScope?.[id];
     return varInfo?.reactive === true;
-  });
+  }) : [];
   
   // Add reactive deps as virtual params in current scope (so body doesn't wrap them)
   for (const dep of reactiveDepsForBody) {
     currentScope[dep] = { type: 'param', reactive: false }; // Treat as non-reactive param
+  }
+  
+  // If this function will be wrapped with _liftFn, mark scope as non-reactive
+  // Nested functions don't need _liftFn just for having params
+  if (reactiveDepsForBody.length > 0) {
+    currentScope[reactiveScope] = false;
   }
   
   const params = expr.parameters.map(param => {
@@ -1351,8 +1411,9 @@ function convertArrowFunction(expr) {
   // Restore parent scope
   currentScope = savedScope;
 
-  // If there are reactive deps or params, wrap with _liftFn
-  if (reactiveDepsForBody.length > 0 || params.length > 0) {
+  // If there are reactive deps, OR (params AND we're in a reactive scope), wrap with _liftFn
+  // In non-reactive scopes, we don't need _liftFn just for having params
+  if (reactiveDepsForBody.length > 0 || (params.length > 0 && inReactiveScope)) {
     usedModifiers.add('liftFn');
     
     // Prepend reactive dep params to original params
@@ -1838,7 +1899,12 @@ function convertJSXChild(child) {
     return t.stringLiteral(text);
   } else if (child.type === 'jsxExpression') {
     // JSX expression: {expr} -> _x((deps) => expr(), [deps])
+    // Mark scope as non-reactive for nested functions (will be wrapped with _x)
+    const savedScope = currentScope;
+    currentScope = Object.create(currentScope);
+    currentScope[reactiveScope] = false;
     const innerExpr = convertExpression(child.expression);
+    currentScope = savedScope;
     return createReactiveExpr(child.expression, innerExpr);
   } else if (child.type === 'jsxElement') {
     return convertJSXElement(child);
@@ -1865,6 +1931,11 @@ function convertJSXElement(expr) {
   if (hasSpread) {
     // With spread: wrap entire props object in _x()
     // _x((deps...) => ({ ...spread(), attr: value() }), [deps...])
+    // Mark scope as non-reactive for nested functions (will be wrapped with _x)
+    const savedScopeSpread = currentScope;
+    currentScope = Object.create(currentScope);
+    currentScope[reactiveScope] = false;
+    
     const properties = [];
     const oddoExprs = []; // Collect Oddo AST for identifier extraction
 
@@ -1892,6 +1963,9 @@ function convertJSXElement(expr) {
         properties.push(t.objectProperty(key, value));
       }
     }
+    
+    // Restore scope
+    currentScope = savedScopeSpread;
 
     const propsObj = t.objectExpression(properties);
     // Create synthetic Oddo object for identifier collection
@@ -1919,10 +1993,20 @@ function convertJSXElement(expr) {
         value = t.stringLiteral(attr.value.value);
       } else if (attr.value.type === 'expression') {
         // Expression: value={x} -> {value: _x((x) => x(), [x])}
+        // Mark scope as non-reactive for nested functions (will be wrapped with _x)
+        const savedScopeAttr = currentScope;
+        currentScope = Object.create(currentScope);
+        currentScope[reactiveScope] = false;
         const innerExpr = convertExpression(attr.value.value);
+        currentScope = savedScopeAttr;
         value = createReactiveExpr(attr.value.value, innerExpr, true);
       } else {
+        // Mark scope as non-reactive for nested functions (will be wrapped with _x)
+        const savedScopeAttr = currentScope;
+        currentScope = Object.create(currentScope);
+        currentScope[reactiveScope] = false;
         const innerExpr = convertExpression(attr.value);
+        currentScope = savedScopeAttr;
         value = createReactiveExpr(attr.value, innerExpr, true);
       }
 
