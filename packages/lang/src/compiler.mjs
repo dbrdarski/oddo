@@ -201,10 +201,35 @@ const MODIFIER_TRANSFORMATIONS = {
   state: {
     needsImport: true,
     // @state x = 3 -> const [x, setX] = _state(3);
-    transform: (valueExpr, leftExpr) => {
+    // @state x = reactiveVar -> const [x, setX] = _state(_lift(_reactiveVar => _reactiveVar(), [reactiveVar]));
+    // Receives Oddo AST, extracts deps, lifts if needed
+    transform: (oddoExpr, leftExpr) => {
+      // Collect identifiers and filter to reactive deps
+      const allIdentifiers = collectOddoIdentifiersOnly(oddoExpr);
+      const reactiveDeps = allIdentifiers.filter(id => isReactive(id));
+      
+      // Convert Oddo AST to Babel AST
+      const convertedExpr = convertExpression(oddoExpr);
+      
+      let stateArg;
+      if (reactiveDeps.length > 0) {
+        // Wrap with _lift for reactive deps
+        usedModifiers.add('lift');
+        const prefixedParams = reactiveDeps.map(id => t.identifier('_' + id));
+        const deps = reactiveDeps.map(id => t.identifier(id));
+        const arrowFunc = t.arrowFunctionExpression(prefixedParams, convertedExpr);
+        wrapDependenciesWithCalls(arrowFunc, reactiveDeps, '_');
+        stateArg = t.callExpression(
+          t.identifier(modifierAliases['lift']),
+          [arrowFunc, t.arrayExpression(deps)]
+        );
+      } else {
+        stateArg = convertedExpr;
+      }
+      
       const stateCall = t.callExpression(
         t.identifier(modifierAliases['state']),
-        [valueExpr]
+        [stateArg]
       );
 
       // If there's a left side (variable name), create array destructuring
@@ -1012,14 +1037,14 @@ function convertExpressionStatement(stmt) {
       if (stmt.expression.type === 'variableDeclaration' || stmt.expression.type === 'assignment') {
         leftExpr = convertExpression(stmt.expression.left);
         // For modifiers that need Oddo AST, pass original Oddo AST for special processing
-        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook') {
+        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook' || stmt.modifier === 'state') {
           valueExpr = stmt.expression.right; // Oddo AST, not converted
         } else {
           valueExpr = convertExpression(stmt.expression.right);
         }
       } else {
         // Otherwise, use the expression itself as the value
-        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook') {
+        if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook' || stmt.modifier === 'state') {
           valueExpr = stmt.expression; // Oddo AST, not converted
         } else {
           valueExpr = convertExpression(stmt.expression);
@@ -1060,14 +1085,14 @@ function convertExpressionStatement(stmt) {
           if (blockStmt.expression.type === 'variableDeclaration' || blockStmt.expression.type === 'assignment') {
             leftExpr = convertExpression(blockStmt.expression.left);
             // For modifiers that need Oddo AST, pass raw Oddo AST (they extract deps from Oddo)
-            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook') {
+            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook' || stmt.modifier === 'state') {
               valueExpr = blockStmt.expression.right;  // Oddo AST
             } else {
               valueExpr = convertExpression(blockStmt.expression.right);  // Babel AST
             }
           } else {
             // Otherwise, use the expression itself as the value
-            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook') {
+            if (stmt.modifier === 'mutate' || stmt.modifier === 'effect' || stmt.modifier === 'computed' || stmt.modifier === 'mutable' || stmt.modifier === 'component' || stmt.modifier === 'hook' || stmt.modifier === 'state') {
               valueExpr = blockStmt.expression;  // Oddo AST
             } else {
               valueExpr = convertExpression(blockStmt.expression);  // Babel AST
@@ -1140,7 +1165,42 @@ function convertExpressionStatement(stmt) {
   let expression = null;
 
   if (stmt.expression) {
-    expression = convertExpression(stmt.expression);
+    // Check if this is a plain expression statement (not a declaration or assignment)
+    // that contains reactive deps - if so, wrap with _lift
+    const isPlainExpr = stmt.expression.type !== 'variableDeclaration' && 
+                        stmt.expression.type !== 'assignment' &&
+                        stmt.expression.type !== 'arraySliceAssignment';
+    
+    if (isPlainExpr) {
+      const allIdentifiers = collectOddoIdentifiersOnly(stmt.expression);
+      const reactiveDeps = allIdentifiers.filter(id => isReactive(id));
+      
+      if (reactiveDeps.length > 0) {
+        // Mark scope as non-reactive for conversion
+        const savedScope = currentScope;
+        currentScope = Object.create(currentScope);
+        currentScope[reactiveScope] = false;
+        
+        const convertedExpr = convertExpression(stmt.expression);
+        
+        currentScope = savedScope;
+        
+        // Wrap with _lift
+        usedModifiers.add('lift');
+        const prefixedParams = reactiveDeps.map(id => t.identifier('_' + id));
+        const deps = reactiveDeps.map(id => t.identifier(id));
+        const arrowFunc = t.arrowFunctionExpression(prefixedParams, convertedExpr);
+        wrapDependenciesWithCalls(arrowFunc, reactiveDeps, '_');
+        expression = t.callExpression(
+          t.identifier(modifierAliases['lift']),
+          [arrowFunc, t.arrayExpression(deps)]
+        );
+      } else {
+        expression = convertExpression(stmt.expression);
+      }
+    } else {
+      expression = convertExpression(stmt.expression);
+    }
   }
 
   // If there's a block, wrap in an IIFE or handle appropriately
