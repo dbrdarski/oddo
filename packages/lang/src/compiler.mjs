@@ -16,7 +16,7 @@ function isValidJSIdentifier(name) {
 }
 
 // Wrap dependency references with call expressions: x -> x()
-function wrapDependenciesWithCalls(arrowFunc, deps) {
+function wrapDependenciesWithCalls(arrowFunc, deps, prefix = '') {
   const depSet = new Set(deps);
   const locals = new Set();
 
@@ -37,6 +37,18 @@ function wrapDependenciesWithCalls(arrowFunc, deps) {
   const shorthandToExpand = [];
   traverse(tempFile, {
     noScope: true,
+    // Skip already-processed reactive expression calls - don't modify their deps arrays
+    // These have the pattern: _x(fn, deps) or _computed(fn, deps) or similar
+    CallExpression(path) {
+      const callee = path.node.callee;
+      // Check if this looks like a reactive wrapper call (identifier starting with _ followed by fn and array)
+      if (t.isIdentifier(callee) && callee.name.startsWith('_') && 
+          path.node.arguments.length === 2 &&
+          t.isArrowFunctionExpression(path.node.arguments[0]) &&
+          t.isArrayExpression(path.node.arguments[1])) {
+        path.skip(); // Don't traverse into this call's children
+      }
+    },
     Identifier(path) {
       // Skip if this is a param of the main arrow function
       if (t.isArrowFunctionExpression(path.parent) && path.parent.params.includes(path.node)) {
@@ -71,12 +83,13 @@ function wrapDependenciesWithCalls(arrowFunc, deps) {
       }
     }
   });
-  // Expand shorthand properties: { c } -> { c: c() }
+  // Expand shorthand properties: { c } -> { c: c() } or { c: _c() } with prefix
   shorthandToExpand.forEach(({ prop, name }) => {
     prop.shorthand = false;
-    prop.value = t.callExpression(t.identifier(name), []);
+    prop.value = t.callExpression(t.identifier(prefix + name), []);
   });
-  toReplace.forEach(p => p.replaceWith(t.callExpression(t.identifier(p.node.name), [])));
+  // Replace identifiers: foo -> foo() or foo -> _foo() with prefix
+  toReplace.forEach(p => p.replaceWith(t.callExpression(t.identifier(prefix + p.node.name), [])));
 }
 
 // Check if an identifier is known to be non-reactive (@mutable or normal declaration)
@@ -148,7 +161,8 @@ function createLiftedExpr(valueExpr, identifiers) {
 // attrExpression: whether this is for a JSX attribute (uses 'computed' pragma)
 function createReactiveExpr(oddoExpr, valueExpr, attrExpression = false) {
   // Extract identifiers from Oddo AST and filter to reactive ones
-  const allIdentifiers = collectOddoIdentifiersOnly(oddoExpr);
+  // Stop at nested jsxExpression nodes - each is its own reactivity boundary
+  const allIdentifiers = collectOddoIdentifiersOnly(oddoExpr, new Set(), true);
   const identifiers = allIdentifiers.filter(id => isReactive(id));
   const pragma = attrExpression ? 'computed' : 'x'
 
@@ -167,10 +181,13 @@ function createReactiveExpr(oddoExpr, valueExpr, attrExpression = false) {
   }
 
   usedModifiers.add(pragma);
-  const params = identifiers.map(id => t.identifier(id));
+  // Use prefixed param names to avoid shadowing in nested scopes
+  const params = identifiers.map(id => t.identifier('_' + id));
+  // Deps array uses original names (references the actual reactive signals)
   const deps = identifiers.map(id => t.identifier(id));
   const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
-  wrapDependenciesWithCalls(arrowFunc, identifiers);
+  // Replace identifiers with prefixed + called versions: foo -> _foo()
+  wrapDependenciesWithCalls(arrowFunc, identifiers, '_');
 
   return t.callExpression(
     t.identifier(modifierAliases[pragma]),
@@ -635,7 +652,10 @@ const reactiveScope = Symbol("reactive-scope");
 
 // Variable info structure: { type: 'state'|'computed'|'mutable'|'immutable'|'param'|'import-oddo'|'import-js', reactive: boolean }
 function declareVariable(name, type) {
-  const reactive = (type === 'state' || type === 'computed' || type === 'param' || type === 'import-oddo');
+  // Only state, computed, and oddo imports are reactive
+  // Regular params are NOT reactive (they receive plain values from callers)
+  // @component/@hook params use 'reactive-param' type and ARE reactive
+  const reactive = (type === 'state' || type === 'computed' || type === 'reactive-param' || type === 'import-oddo');
   currentScope[name] = { type, reactive };
 }
 
@@ -1505,8 +1525,13 @@ function convertReactiveContainer(expr) {
 }
 
 // Helper: collect identifiers from Oddo AST without side effects
-function collectOddoIdentifiersOnly(node, names = new Set()) {
+function collectOddoIdentifiersOnly(node, names = new Set(), stopAtJsxExpressions = false) {
   if (!node || typeof node !== 'object') return Array.from(names);
+
+  // Stop at jsxExpression boundaries - each is its own reactivity scope
+  if (stopAtJsxExpressions && node.type === 'jsxExpression') {
+    return Array.from(names);
+  }
 
   if (node.type === 'identifier') {
     names.add(node.name);
@@ -1515,10 +1540,10 @@ function collectOddoIdentifiersOnly(node, names = new Set()) {
   // Special handling for object properties - key is not a reference unless computed
   if (node.type === 'property') {
     if (node.computed && node.key) {
-      collectOddoIdentifiersOnly(node.key, names);
+      collectOddoIdentifiersOnly(node.key, names, stopAtJsxExpressions);
     }
     if (node.value) {
-      collectOddoIdentifiersOnly(node.value, names);
+      collectOddoIdentifiersOnly(node.value, names, stopAtJsxExpressions);
     }
     return Array.from(names);
   }
@@ -1527,9 +1552,9 @@ function collectOddoIdentifiersOnly(node, names = new Set()) {
     if (key === 'type') continue;
     const val = node[key];
     if (Array.isArray(val)) {
-      val.forEach(item => collectOddoIdentifiersOnly(item, names));
+      val.forEach(item => collectOddoIdentifiersOnly(item, names, stopAtJsxExpressions));
     } else if (val && typeof val === 'object') {
-      collectOddoIdentifiersOnly(val, names);
+      collectOddoIdentifiersOnly(val, names, stopAtJsxExpressions);
     }
   }
   return Array.from(names);

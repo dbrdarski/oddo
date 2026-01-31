@@ -1,6 +1,6 @@
 {
   "name": "@oddo/lang",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "type": "module",
   "description": "Oddo Language Package",
   "main": "./dist/index.js",
