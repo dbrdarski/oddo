@@ -250,6 +250,23 @@ const MODIFIER_TRANSFORMATIONS = {
             stateCall
           )
         ]);
+      } else if (leftExpr && t.isArrayPattern(leftExpr) && leftExpr.elements.length === 2) {
+        // User-provided setter name: @state [x, setX] = value
+        const getterName = leftExpr.elements[0].name;
+        const setterName = leftExpr.elements[1].name;
+
+        // Track state-to-setter mapping for @mutate validation
+        stateSetterMap.set(getterName, setterName);
+
+        return t.variableDeclaration('const', [
+          t.variableDeclarator(
+            t.arrayPattern([
+              t.identifier(getterName),
+              t.identifier(setterName)
+            ]),
+            stateCall
+          )
+        ]);
       }
       return t.expressionStatement(stateCall);
     },
@@ -768,8 +785,16 @@ function collectOddoIdentifiers(node, names = new Set()) {
 
   // Collect variable declarations into current scope
   if (node.type === 'expressionStatement') {
-    const varName = node.expression?.left?.name;
-    if (varName) {
+    const left = node.expression?.left;
+    const varName = left?.name;
+    
+    // Handle @state with array pattern: @state [x, setX] = value
+    if (node.modifier === 'state' && left?.type === 'arrayPattern' && left.elements?.length === 2) {
+      const getterName = left.elements[0]?.name;
+      const setterName = left.elements[1]?.name;
+      if (getterName) declareVariable(getterName, 'state');
+      if (setterName) declareVariable(setterName, 'immutable');  // setter is not reactive
+    } else if (varName) {
       // Determine variable type based on modifier
       if (node.modifier === 'state') {
         declareVariable(varName, 'state');
