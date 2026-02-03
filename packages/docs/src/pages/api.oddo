@@ -51,6 +51,7 @@ APIPage = () => {
         <div class="doc-feature">
           <h3>{atSign}mutate</h3>
           <p>Defines mutation functions that can safely modify state. Enables batched updates.</p>
+          <CodeExample code={codeMutate} />
         </div>
       </section>
 
