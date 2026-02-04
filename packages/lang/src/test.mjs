@@ -287,14 +287,6 @@ test('Computed modifier extracts identifiers', () => {
   assert(js.includes('[x, y]'), 'Should have dependency array with x and y');
 });
 
-test('React modifier extracts identifiers', () => {
-  // x and y must be declared as @state to be reactive dependencies
-  const js = compileOddoToJS('@state x = 1\n@state y = 2\n@react sum = x + y');
-  assert(/import \{.*react as \w+.*\} from "@oddo\/ui"/.test(js), 'Should import react');
-  assert(/const sum = \w+\(\(x, y\) =>/.test(js), 'Should call react with arrow function');
-  assert(js.includes('[x, y]'), 'Should have dependency array with x and y');
-});
-
 test('Mutate modifier with arrow function', () => {
   // @mutate requires := assignments inside the function body
   const js = compileOddoToJS('@state count = 0\n@mutate increment = () => { count := count + 1 }');
@@ -323,12 +315,6 @@ test('Computed modifier block applies to each statement', () => {
   const js = compileOddoToJS('@computed: {\n  sum = x + y\n  product = x * y\n}');
   assert(/const sum = \w+\(/.test(js), 'Should have first computed declaration');
   assert(/const product = \w+\(/.test(js), 'Should have second computed declaration');
-});
-
-test('React modifier block applies to each statement', () => {
-  const js = compileOddoToJS('@react: {\n  total = a + b\n  diff = a - b\n}');
-  assert(/const total = \w+\(/.test(js), 'Should have first react declaration');
-  assert(/const diff = \w+\(/.test(js), 'Should have second react declaration');
 });
 
 test('Mutate modifier block applies to each statement', () => {

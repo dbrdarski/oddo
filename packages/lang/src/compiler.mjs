@@ -326,18 +326,59 @@ const MODIFIER_TRANSFORMATIONS = {
       // Extract function parameters
       const funcParams = (oddoExpr.parameters || []).map(p => p.name);
 
-      // Find all := assignments in the function body
-      // Each assignment has a 'kind': 'state' or 'mutable'
-      const assignments = [];
-      const bodyStatements = oddoExpr.body?.body || [];
+      // Use the scope that was built during collectOddoIdentifiers
+      // This scope has: function params, local variable declarations, and inherits outer scope
+      const mutateScope = oddoExpr._scope;
 
-      for (const stmt of bodyStatements) {
+      // Process ALL statements in body, classifying each one
+      // Map for unique state mutations: varName -> { kind, setter }
+      const stateAssignmentsMap = new Map();
+      // Array of all statements in order for body generation
+      const processedStatements = [];
+      
+      const oddoBodyStatements = oddoExpr.body?.body || [];
+      let hasMutation = false;
+
+      for (const stmt of oddoBodyStatements) {
         if (stmt.type === 'expressionStatement') {
           // Handle regular assignments (simple := and compound like +:=, -:=, etc.)
           if (stmt.expression?.type === 'assignment') {
             const leftName = stmt.expression.left?.name;
+            
+            // Member access assignment (x.y := 1, x[0] := 1, etc.)
+            if (!leftName && stmt.expression.left?.type === 'memberAccess') {
+              hasMutation = true;
+              // For compound member assignments, expand: x.y +:= 1 -> x.y := x.y + 1
+              let rightOddo = stmt.expression.right;
+              const op = stmt.expression.operator;
+              if (op !== ':=') {
+                const baseOp = op.slice(0, -2);
+                let exprType;
+                if (baseOp === '??') {
+                  exprType = 'nullishCoalescing';
+                } else if (baseOp === '&&' || baseOp === '||') {
+                  exprType = 'logical';
+                } else {
+                  exprType = 'binary';
+                }
+                rightOddo = {
+                  type: exprType,
+                  operator: baseOp,
+                  left: stmt.expression.left,
+                  right: stmt.expression.right
+                };
+              }
+              processedStatements.push({
+                kind: 'member',
+                leftOddo: stmt.expression.left,
+                rightOddo
+              });
+              continue;
+            }
+            
+            // Other unsupported left-hand sides (destructuring, etc.)
             if (!leftName) {
-              throw new Error('@mutate: assignment must have an identifier on the left side');
+              throw new Error('@mutate: unsupported left-hand side in assignment');
             }
             
             // For compound assignments, expand to full form: x +:= y -> x := x + y
@@ -366,21 +407,33 @@ const MODIFIER_TRANSFORMATIONS = {
             
             // Check if it's a @state or @mutable variable
             if (stateSetterMap.has(leftName)) {
-              assignments.push({
-                name: leftName,
+              hasMutation = true;
+              // Track unique state mutations (Map deduplicates by name)
+              // Always set to 'state' - takes precedence over 'state-slice' for finalizer
+              stateAssignmentsMap.set(leftName, {
                 kind: 'state',
-                setter: stateSetterMap.get(leftName),
+                setter: stateSetterMap.get(leftName)
+              });
+              processedStatements.push({
+                kind: 'state',
+                name: leftName,
                 rightOddo
               });
             } else if (mutableVariables.has(leftName)) {
-              assignments.push({
-                name: leftName,
+              hasMutation = true;
+              processedStatements.push({
                 kind: 'mutable',
+                name: leftName,
                 rightOddo
               });
             } else {
-              throw new Error(`@mutate: Cannot mutate '${leftName}': not a @state or @mutable variable in current scope`);
+              // Not a @state or @mutable - treat as regular statement (e.g., local var assignment)
+              processedStatements.push({
+                kind: 'regular',
+                stmtOddo: stmt
+              });
             }
+            continue;
           }
           
           // Handle array slice assignments: arr[0...2] := value
@@ -392,77 +445,83 @@ const MODIFIER_TRANSFORMATIONS = {
             
             // Check if it's a @state or @mutable variable
             if (stateSetterMap.has(arrayName)) {
-              assignments.push({
-                name: arrayName,
+              hasMutation = true;
+              // Track unique state mutations
+              if (!stateAssignmentsMap.has(arrayName)) {
+                stateAssignmentsMap.set(arrayName, {
+                  kind: 'state-slice',
+                  setter: stateSetterMap.get(arrayName)
+                });
+              }
+              processedStatements.push({
                 kind: 'state-slice',
-                setter: stateSetterMap.get(arrayName),
+                name: arrayName,
                 sliceOddo: stmt.expression.slice,
                 rightOddo: stmt.expression.value
               });
             } else if (mutableVariables.has(arrayName)) {
-              assignments.push({
-                name: arrayName,
+              hasMutation = true;
+              processedStatements.push({
                 kind: 'mutable-slice',
+                name: arrayName,
                 sliceOddo: stmt.expression.slice,
                 rightOddo: stmt.expression.value
               });
             } else {
               throw new Error(`@mutate: Cannot mutate '${arrayName}': not a @state or @mutable variable in current scope`);
             }
+            continue;
           }
         }
+        
+        // Any other statement type - pass through (variable declarations, function calls, etc.)
+        processedStatements.push({
+          kind: 'regular',
+          stmtOddo: stmt
+        });
       }
 
-      if (assignments.length === 0) {
+      if (!hasMutation) {
         throw new Error('@mutate function must contain at least one mutation');
       }
 
-      // Separate state and mutable assignments (including slice variants)
-      const stateAssignments = assignments.filter(a => a.kind === 'state' || a.kind === 'state-slice');
-      const mutableAssignments = assignments.filter(a => a.kind === 'mutable' || a.kind === 'mutable-slice');
+      // Get unique state variable names from Map
+      const uniqueStateNames = Array.from(stateAssignmentsMap.keys());
       
-      // Only state containers need special handling (not slices - they modify in place)
-      const stateContainerNames = assignments.filter(a => a.kind === 'state').map(a => a.name);
-      const allAssignmentNames = assignments.filter(a => a.kind === 'state' || a.kind === 'mutable').map(a => a.name);
-
-      // Collect outer dependencies from all right-hand sides (and slice expressions)
-      // Exclude @mutable variables from callable deps (they're plain values)
-      const outerDeps = new Set();
-      for (const assignment of assignments) {
-        collectOddoIdentifiers(assignment.rightOddo).forEach(id => {
-          if (!funcParams.includes(id) && !allAssignmentNames.includes(id)) {
-            outerDeps.add(id);
-          }
-        });
-        // Also collect deps from slice expressions (start, end indices)
-        if (assignment.sliceOddo) {
-          if (assignment.sliceOddo.start) {
-            collectOddoIdentifiers(assignment.sliceOddo.start).forEach(id => {
-              if (!funcParams.includes(id) && !allAssignmentNames.includes(id)) {
-                outerDeps.add(id);
-              }
-            });
-          }
-          if (assignment.sliceOddo.end) {
-            collectOddoIdentifiers(assignment.sliceOddo.end).forEach(id => {
-              if (!funcParams.includes(id) && !allAssignmentNames.includes(id)) {
-                outerDeps.add(id);
-              }
-            });
+      // Collect outer reactive dependencies using scope system
+      // Switch to mutate's scope for isReactive() checks
+      const savedScopeMutate = currentScope;
+      currentScope = mutateScope;
+      
+      const outerReactiveDeps = new Set();
+      for (const processed of processedStatements) {
+        // Collect identifiers from right-hand side expressions
+        const nodesToScan = [];
+        if (processed.rightOddo) nodesToScan.push(processed.rightOddo);
+        if (processed.sliceOddo?.start) nodesToScan.push(processed.sliceOddo.start);
+        if (processed.sliceOddo?.end) nodesToScan.push(processed.sliceOddo.end);
+        if (processed.stmtOddo) nodesToScan.push(processed.stmtOddo);
+        
+        for (const node of nodesToScan) {
+          const ids = collectOddoIdentifiersOnly(node);
+          for (const id of ids) {
+            // isReactive() checks: is it declared as reactive (@state, @computed)?
+            // Local vars (immutable) and params are NOT reactive
+            // Outer @state/@computed ARE reactive
+            if (isReactive(id) && !uniqueStateNames.includes(id)) {
+              outerReactiveDeps.add(id);
+            }
           }
         }
       }
-      const outerDepsArray = Array.from(outerDeps);
-
-      // Get all state names (regular + slice) for the mutate function
-      const stateSliceNames = assignments.filter(a => a.kind === 'state-slice').map(a => a.name);
-      const allStateNamesForParams = [...stateContainerNames, ...stateSliceNames];
+      
+      const outerDepsArray = Array.from(outerReactiveDeps);
       
       // Build the mutate function body
       // Parameters: (finalizer, ...stateContainers, ...outerDeps, ...originalParams)
       const mutateParams = [
         t.identifier('finalizer'),
-        ...allStateNamesForParams.map(n => t.identifier(n)),
+        ...uniqueStateNames.map(n => t.identifier(n)),
         ...outerDepsArray.map(n => t.identifier(n)),
         ...funcParams.map(n => t.identifier(n))
       ];
@@ -470,35 +529,38 @@ const MODIFIER_TRANSFORMATIONS = {
       // Build body statements
       const mutateBodyStmts = [];
       
-      // Only add stateProxy if we have state assignments
-      if (stateAssignments.length > 0) {
+      // Check if we have any state assignments (regular, not slice)
+      const hasStateAssignments = Array.from(stateAssignmentsMap.values()).some(v => v.kind === 'state');
+      if (hasStateAssignments) {
         usedModifiers.add('stateProxy');
       }
 
       // Set of all identifiers that need to be called with ()
-      // This includes: state containers, state-slice arrays, outer deps that are NOT @mutable
+      // This includes: state containers + outer reactive deps
       const callableIds = new Set([
-        ...stateContainerNames,
-        ...stateSliceNames,
-        ...outerDepsArray.filter(id => !mutableVariables.has(id))
+        ...uniqueStateNames,
+        ...outerDepsArray
       ]);
 
       // Mark scope as non-reactive for nested functions (deps are unwrapped inside @mutate)
-      const savedScopeMutate = currentScope;
-      currentScope = Object.create(currentScope);
+      // Also mark all callable ids as non-reactive so convertStatement doesn't apply lift
+      currentScope = Object.create(mutateScope);
       currentScope[reactiveScope] = false;
+      for (const id of callableIds) {
+        currentScope[id] = { type: 'param', reactive: false };
+      }
 
-      for (const assignment of assignments) {
-        // Convert right side to Babel AST
-        const rightBabel = convertExpression(assignment.rightOddo);
-
-        // Wrap identifiers that are callable (reactive containers) with ()
-        const tempFile = t.file(t.program([t.expressionStatement(rightBabel)]));
+      // Helper function to wrap reactive identifiers with () calls
+      const wrapCallableIds = (babelExpr, skipNode = null) => {
+        const tempFile = t.file(t.program([t.expressionStatement(babelExpr)]));
         const toReplace = [];
         const shorthandToExpand = [];
         traverse(tempFile, {
           noScope: true,
           Identifier(path) {
+            if (skipNode && path.node === skipNode) {
+              return;
+            }
             const parent = path.parent;
             const isMemberProp = (t.isMemberExpression(parent) || t.isOptionalMemberExpression(parent)) && parent.property === path.node && !parent.computed;
             const isObjectKey = t.isObjectProperty(parent) && parent.key === path.node && !parent.shorthand;
@@ -518,17 +580,19 @@ const MODIFIER_TRANSFORMATIONS = {
           prop.value = t.callExpression(t.identifier(name), []);
         });
         toReplace.forEach(p => p.replaceWith(t.callExpression(t.identifier(p.node.name), [])));
+        return tempFile.program.body[0].expression;
+      };
 
-        // Get the modified expression from tempFile
-        const wrappedRightExpr = tempFile.program.body[0].expression;
-
-        if (assignment.kind === 'state') {
+      for (const processed of processedStatements) {
+        if (processed.kind === 'state') {
           // stateContainer = stateProxy(rightExpr)
+          const rightBabel = convertExpression(processed.rightOddo);
+          const wrappedRightExpr = wrapCallableIds(rightBabel);
           mutateBodyStmts.push(
             t.expressionStatement(
               t.assignmentExpression(
                 '=',
-                t.identifier(assignment.name),
+                t.identifier(processed.name),
                 t.callExpression(
                   t.identifier(modifierAliases['stateProxy']),
                   [wrappedRightExpr]
@@ -536,71 +600,76 @@ const MODIFIER_TRANSFORMATIONS = {
               )
             )
           );
-        } else if (assignment.kind === 'mutable') {
+        } else if (processed.kind === 'mutable') {
           // mutable: direct assignment
+          const rightBabel = convertExpression(processed.rightOddo);
+          const wrappedRightExpr = wrapCallableIds(rightBabel);
           mutateBodyStmts.push(
             t.expressionStatement(
               t.assignmentExpression(
                 '=',
-                t.identifier(assignment.name),
+                t.identifier(processed.name),
                 wrappedRightExpr
               )
             )
           );
-        } else if (assignment.kind === 'state-slice' || assignment.kind === 'mutable-slice') {
+        } else if (processed.kind === 'state-slice' || processed.kind === 'mutable-slice') {
           // Slice assignment: convert the full arraySliceAssignment expression
-          // Reconstruct the Oddo AST for the slice assignment
           const sliceAssignmentOddo = {
             type: 'arraySliceAssignment',
-            slice: assignment.sliceOddo,
-            value: assignment.rightOddo
+            slice: processed.sliceOddo,
+            value: processed.rightOddo
           };
           const sliceExpr = convertExpression(sliceAssignmentOddo);
           
-          // Wrap identifiers in the slice expression with () calls
-          const sliceTempFile = t.file(t.program([t.expressionStatement(sliceExpr)]));
-          const sliceToReplace = [];
-          const sliceShorthandToExpand = [];
-          traverse(sliceTempFile, {
-            noScope: true,
-            Identifier(path) {
-              const parent = path.parent;
-              const isMemberProp = (t.isMemberExpression(parent) || t.isOptionalMemberExpression(parent)) && parent.property === path.node && !parent.computed;
-              const isObjectKey = t.isObjectProperty(parent) && parent.key === path.node && !parent.shorthand;
-              const isShorthand = t.isObjectProperty(parent) && parent.shorthand && parent.key === path.node;
-
-              if (callableIds.has(path.node.name) && !isMemberProp && !isObjectKey) {
-                if (isShorthand) {
-                  sliceShorthandToExpand.push({ prop: parent, name: path.node.name });
-                } else {
-                  sliceToReplace.push(path);
-                }
+          // The sliceExpr is: _arraySplice(arr, [start, deleteCount].concat(value))
+          // First argument (arr) should NOT be transformed - proxy magic handles it
+          const firstArg = sliceExpr.arguments[0];
+          const wrappedSliceExpr = wrapCallableIds(sliceExpr, firstArg);
+          
+          mutateBodyStmts.push(t.expressionStatement(wrappedSliceExpr));
+        } else if (processed.kind === 'member') {
+          // Member access assignment: x.y := expr, x[0] := expr
+          const leftBabel = convertExpression(processed.leftOddo);
+          const rightBabel = convertExpression(processed.rightOddo);
+          const wrappedRightExpr = wrapCallableIds(rightBabel);
+          mutateBodyStmts.push(
+            t.expressionStatement(
+              t.assignmentExpression('=', leftBabel, wrappedRightExpr)
+            )
+          );
+        } else if (processed.kind === 'regular') {
+          // Regular statement: convert normally with reactive wrapping
+          const convertedStmt = convertStatement(processed.stmtOddo);
+          // Wrap callable ids in the converted statement
+          if (t.isVariableDeclaration(convertedStmt)) {
+            for (const decl of convertedStmt.declarations) {
+              if (decl.init) {
+                decl.init = wrapCallableIds(decl.init);
               }
             }
-          });
-          sliceShorthandToExpand.forEach(({ prop, name }) => {
-            prop.shorthand = false;
-            prop.value = t.callExpression(t.identifier(name), []);
-          });
-          sliceToReplace.forEach(p => p.replaceWith(t.callExpression(t.identifier(p.node.name), [])));
-          
-          mutateBodyStmts.push(t.expressionStatement(sliceTempFile.program.body[0].expression));
+          } else if (t.isExpressionStatement(convertedStmt)) {
+            convertedStmt.expression = wrapCallableIds(convertedStmt.expression);
+          }
+          mutateBodyStmts.push(convertedStmt);
         }
       }
 
-      // Restore scope after processing assignments
+      // Restore scope after processing
       currentScope = savedScopeMutate;
 
-      // Collect all state variable names that need finalizer handling (both regular and slice)
-      const allStateNames = stateAssignments.map(a => a.name);
+      // Get state names that need finalizer (only regular state assignments, not slices)
+      const stateNamesForFinalizer = Array.from(stateAssignmentsMap.entries())
+        .filter(([_, info]) => info.kind === 'state')
+        .map(([name, _]) => name);
       
-      // Add finalizer call for all state variables: finalizer(x1(), x2(), arr())
-      if (allStateNames.length > 0) {
+      // Add finalizer call for state variables: finalizer(x1(), x2())
+      if (stateNamesForFinalizer.length > 0) {
         mutateBodyStmts.push(
           t.expressionStatement(
             t.callExpression(
               t.identifier('finalizer'),
-              allStateNames.map(n => t.callExpression(t.identifier(n), []))
+              stateNamesForFinalizer.map(n => t.callExpression(t.identifier(n), []))
             )
           )
         );
@@ -611,11 +680,12 @@ const MODIFIER_TRANSFORMATIONS = {
         t.blockStatement(mutateBodyStmts)
       );
 
-      // Build finalizer function for all state assignments (regular and slice)
-      const finalizerParams = allStateNames.map(n => t.identifier(n));
-      const finalizerCalls = stateAssignments.map(a =>
-        t.callExpression(t.identifier(a.setter), [t.identifier(a.name)])
-      );
+      // Build finalizer function for state assignments
+      const finalizerParams = stateNamesForFinalizer.map(n => t.identifier(n));
+      const finalizerCalls = stateNamesForFinalizer.map(name => {
+        const info = stateAssignmentsMap.get(name);
+        return t.callExpression(t.identifier(info.setter), [t.identifier(name)]);
+      });
       const finalizerBody = finalizerCalls.length === 0
         ? t.identifier('undefined')
         : finalizerCalls.length === 1
@@ -623,9 +693,9 @@ const MODIFIER_TRANSFORMATIONS = {
           : t.sequenceExpression(finalizerCalls);
       const finalizerFunc = t.arrowFunctionExpression(finalizerParams, finalizerBody);
 
-      // Build state containers array (all state variables including slices)
+      // Build state containers array (all unique state variables)
       const stateContainersArray = t.arrayExpression(
-        allStateNamesForParams.map(n => t.identifier(n))
+        uniqueStateNames.map(n => t.identifier(n))
       );
 
       // Build outer deps array
@@ -1039,7 +1109,7 @@ export function compileToJS(ast, config = {}) {
   // Modifiers: state, computed, react, mutate, effect
   // JSX Pragmas: e (element), c (component), x (expression), f (fragment)
   // Helpers: stateProxy
-  const allImports = ['state', 'computed', 'mutate', 'effect', 'stateProxy', 'lift', 'liftFn', 'e', 'c', 'x', 'f'];
+  const allImports = ['state', 'computed', 'mutate', 'effect', 'stateProxy', 'arraySplice', 'lift', 'liftFn', 'e', 'c', 'x', 'f'];
   for (const name of allImports) {
     modifierAliases[name] = `__ODDO_IMPORT_${name}__`;
   }
@@ -2057,19 +2127,16 @@ function convertArraySliceAssignment(expr) {
     [value]
   );
 
-  // Create Array.prototype.splice
-  const spliceMethod = t.memberExpression(
-    t.memberExpression(
-      t.memberExpression(t.identifier('Array'), t.identifier('prototype'), false),
-      t.identifier('splice'),
-      false
-    ),
-    t.identifier('apply'),
-    false
-  );
+  // Mark that we're using the arraySplice helper
+  usedModifiers.add('arraySplice');
 
-  // Create Array.prototype.splice.apply(arr, [start, deleteCount].concat(value))
-  return t.callExpression(spliceMethod, [object, concatCall]);
+  // Create _arraySplice(arr, [start, deleteCount].concat(value))
+  // Note: arr (first arg) should NOT be transformed even if reactive
+  // The @mutate processing will handle wrapping reactive deps in the second arg
+  return t.callExpression(
+    t.identifier(modifierAliases['arraySplice']),
+    [object, concatCall]
+  );
 }
 
 /**
