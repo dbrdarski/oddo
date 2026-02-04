@@ -87,6 +87,9 @@ const tokenClassMap = {
   'AndColonEqual': 'operator',
   'OrColonEqual': 'operator',
   'CaretColonEqual': 'operator',
+  'AndAndColonEqual': 'operator',
+  'OrOrColonEqual': 'operator',
+  'QuestionQuestionColonEqual': 'operator',
   
   // JSX
   'JSXCloseTagStart': 'tag',

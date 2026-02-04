@@ -77,12 +77,17 @@ const copyOnWrite = (target) => {
 		if (dirty) {
 			return target
 		}
-		dirty = update
+		dirty = update // TODO: is this correct?
 		return target = Object.assign(target.constructor(), target)
 	}
 };
 
-const noop = () => {}
+const mutateSymbol = Symbol()
+const noop = () => { }
+const splice = Array.prototype.splice
+export const arraySplice = (target, ...args) =>
+  (args.length && splice.apply(target[mutateSymbol]?.() ?? target, args), target)
+
 export const stateProxy = (target, mutable, notifyParent) => {
   if (target && typeof target === "object") {
     const mutate = copyOnWrite(target)
@@ -110,8 +115,10 @@ export const stateProxy = (target, mutable, notifyParent) => {
         mutable || notifyParent?.(target)
         return true
       },
-      get (_, key) {
-        if (!children.has(key)) {
+      get(_, key) {
+        if (mutateSymbol === key) {
+          return () => target = mutate()
+        } else if (!children.has(key)) {
           const propertyValue = Reflect.get(target, key, target)
           const value = (!target.hasOwnProperty(key) && typeof propertyValue === "function") ? propertyValue.bind(target) : propertyValue
           children.set(key, stateProxy(value, mutable, (value) => {

@@ -75,7 +75,7 @@ const List = function ({ props: { data }, children }) {
 
 **Key points:**
 - Both outer and inner capture `[data]` independently - this is correct
-- Each is a separate reactivity boundary
+- Each is a separate reactivity boundary 
 
 ---
 

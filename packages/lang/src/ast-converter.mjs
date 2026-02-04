@@ -718,7 +718,10 @@ function convertAssignment(cst) {
                       cst.children.UnsignedRightShiftColonEqual?.[0] ||
                       cst.children.AndColonEqual?.[0] ||
                       cst.children.CaretColonEqual?.[0] ||
-                      cst.children.OrColonEqual?.[0];
+                      cst.children.OrColonEqual?.[0] ||
+                      cst.children.AndAndColonEqual?.[0] ||
+                      cst.children.OrOrColonEqual?.[0] ||
+                      cst.children.QuestionQuestionColonEqual?.[0];
 
     if (opToken) {
       const left = convertDestructuringPattern(destructuringPattern);
@@ -761,7 +764,10 @@ function convertAssignment(cst) {
                     cst.children.UnsignedRightShiftColonEqual?.[0] ||
                     cst.children.AndColonEqual?.[0] ||
                     cst.children.CaretColonEqual?.[0] ||
-                    cst.children.OrColonEqual?.[0];
+                    cst.children.OrColonEqual?.[0] ||
+                    cst.children.AndAndColonEqual?.[0] ||
+                    cst.children.OrOrColonEqual?.[0] ||
+                    cst.children.QuestionQuestionColonEqual?.[0];
 
   if (opToken) {
       const right = convertExpression(getFirstChild(cst, 'assignment'));

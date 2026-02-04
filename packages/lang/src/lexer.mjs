@@ -235,6 +235,10 @@ export const UnsignedRightShiftColonEqual = createToken({ name: 'UnsignedRightSh
 export const AndColonEqual = createToken({ name: 'AndColonEqual', pattern: /&:=/ });
 export const CaretColonEqual = createToken({ name: 'CaretColonEqual', pattern: /\^:=/ });
 export const OrColonEqual = createToken({ name: 'OrColonEqual', pattern: /\|:=/ });
+// Logical assignment operators (ES2021)
+export const AndAndColonEqual = createToken({ name: 'AndAndColonEqual', pattern: /&&:=/ });
+export const OrOrColonEqual = createToken({ name: 'OrOrColonEqual', pattern: /\|\|:=/ });
+export const QuestionQuestionColonEqual = createToken({ name: 'QuestionQuestionColonEqual', pattern: /\?\?:=/ });
 export const Equal = createToken({ name: 'Equal', pattern: /=/ });
 
 // Punctuation
@@ -328,6 +332,9 @@ export const allTokens = [
   AndColonEqual, // &:= must come before &
   OrColonEqual, // |:= must come before |
   CaretColonEqual, // ^:= must come before ^
+  AndAndColonEqual, // &&:= must come before &&
+  OrOrColonEqual, // ||:= must come before ||
+  QuestionQuestionColonEqual, // ??:= must come before ??
   EqualEqual,
   BangEqual,
   LessThanEqual,

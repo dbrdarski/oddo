@@ -71,6 +71,9 @@ import {
   AndColonEqual,
   CaretColonEqual,
   OrColonEqual,
+  AndAndColonEqual,
+  OrOrColonEqual,
+  QuestionQuestionColonEqual,
   Equal,
   // Punctuation
   LeftParen,
@@ -159,6 +162,9 @@ class OddoParser extends CstParser {
       AndColonEqual,
       CaretColonEqual,
       OrColonEqual,
+      AndAndColonEqual,
+      OrOrColonEqual,
+      QuestionQuestionColonEqual,
       Equal,
       // Punctuation
       LeftParen,
@@ -625,6 +631,9 @@ class OddoParser extends CstParser {
                 { ALT: () => this.CONSUME(AndColonEqual) },
                 { ALT: () => this.CONSUME(CaretColonEqual) },
                 { ALT: () => this.CONSUME(OrColonEqual) },
+                { ALT: () => this.CONSUME(AndAndColonEqual) },
+                { ALT: () => this.CONSUME(OrOrColonEqual) },
+                { ALT: () => this.CONSUME(QuestionQuestionColonEqual) },
               ]);
               this.SUBRULE1(this.assignment); // Right-associative
             });
@@ -1672,6 +1681,9 @@ class OddoParser extends CstParser {
                   { ALT: () => this.CONSUME(AndColonEqual) },
                   { ALT: () => this.CONSUME(OrColonEqual) },
                   { ALT: () => this.CONSUME(CaretColonEqual) },
+                  { ALT: () => this.CONSUME(AndAndColonEqual) },
+                  { ALT: () => this.CONSUME(OrOrColonEqual) },
+                  { ALT: () => this.CONSUME(QuestionQuestionColonEqual) },
                   { ALT: () => this.CONSUME(EqualEqual) },
                   { ALT: () => this.CONSUME(BangEqual) },
                   { ALT: () => this.CONSUME(LessThanEqual) },

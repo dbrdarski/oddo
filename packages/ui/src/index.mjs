@@ -7,7 +7,8 @@ export {
   transact,
   stateProxy,
   lift,
-  liftFn
+  liftFn,
+  arraySplice
 } from "./reactive.mjs"
 
 export {
