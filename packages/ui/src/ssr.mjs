@@ -2,6 +2,7 @@ import { lift, reactiveSymbol, computed, createAccessor } from "./reactive.mjs";
 import { createAttributes } from "./attrs.mjs";
 
 const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+const voidElements = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"])
 
 const noop = () => {}
 const escapeHtml = unsafe => String(unsafe).replace(/[&<>"']/g, (m) => escapeMap[m])
@@ -16,7 +17,7 @@ export const createElement = (tag, attrs, ...children) => () =>
   `<${tag}${attrs?.[reactiveSymbol]
     ? lift((attrs) => createAttributes(attrs()), [attrs])
     : createAttributes(attrs)
-  }>${children.map(render).join("")}</${tag}>`
+  }${voidElements.has(tag) ? " />" : `>${children.map(render).join("")}</${tag}>`}`
 
 export const createComponent = (component, attrs, ...children) => () => {
   // const initializers = []

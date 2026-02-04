@@ -34,12 +34,12 @@ export const createJsxExpression = (fn, deps) => (parent) => {
 
 export const createFragment = (...children) => (parent, oldNodeCleanup) => {
   const node = new DocumentFragment
-  const startNode = hydrating ? walk() : document.createComment("<")
+  const startNode = hydrating ? walk() : document.createComment("[")
   hydrating || node.appendChild(startNode)
   for (const child of children) {
     render(child)(node)
   }
-  const endNode = hydrating ? walk() : document.createComment(">")
+  const endNode = hydrating ? walk() : document.createComment("]")
   hydrating || node.appendChild(endNode)
   oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
 
