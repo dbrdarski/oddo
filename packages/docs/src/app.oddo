@@ -1,7 +1,6 @@
 // Oddo Language Demo
 // Written in Oddo, compiled to JS
 
-import { e } from "@oddo/ui"
 import { Router, navigation } from "@oddo/router"
 import GuidePage from "./pages/guide"
 import APIPage from "./pages/api"

@@ -1,10 +1,10 @@
 export const reactiveSymbol = Symbol.for("oddo::is-reactive-handler-property-symbol")
 
 class ReactiveContainer {
-  [reactiveSymbol] = true
-
-  constructor (getter) {
-    this.get = getter
+  constructor(getter) {
+    this[reactiveSymbol] = {
+      getter
+    }
     Object.freeze(this)
   }
 }
@@ -31,7 +31,7 @@ export const state = (state) => {
 }
 
 export const bindDependencies = (deps, cleanup) =>
-  deps.map(dep => dep?.[reactiveSymbol] ? dep.get.bind(null, cleanup) : () => dep)
+  deps.map(dep => dep?.[reactiveSymbol]?.getter?.bind(null, cleanup) ?? (() => dep))
 
 export const computed = (fn, deps) => {
   const { subscribe, notify } = observable()
@@ -148,7 +148,7 @@ export const createAccessor = (target) => {
         if (!children.has(key)) {
           const propertyValue = Reflect.get(target, key, target)
           const value = (!target.hasOwnProperty(key) && typeof propertyValue === "function") ? propertyValue.bind(target) : propertyValue
-          children.set(key, createAccessor(value?.[reactiveSymbol] ? value.get() : value))
+          children.set(key, createAccessor(value?.[reactiveSymbol]?.getter() ?? value))
         }
         return children.get(key)
       }
@@ -157,13 +157,13 @@ export const createAccessor = (target) => {
   return target
 }
 
-const liftValue = arg => arg?.[reactiveSymbol] ? arg.get() : arg
+const liftValue = arg => arg?.[reactiveSymbol]?.getter() ?? arg
 const empty = Object.freeze([])
 
 export const mutate = (mutator, targets, otherValues = empty) => {
   otherValues = bindDependencies(otherValues)
   return (...args) => {
-    const stateProxies = targets.map(state => stateProxy(state.get()))
+    const stateProxies = targets.map(state => stateProxy(state[reactiveSymbol].getter()))
     mutator(...stateProxies, ...otherValues, ...args.map(liftValue))
   }
 }
@@ -171,7 +171,7 @@ export const mutate = (mutator, targets, otherValues = empty) => {
 export const transact = (mutator, finalizer, targets, otherValues = empty) => {
   otherValues = bindDependencies(otherValues)
   return (...args) => {
-    const stateProxies = targets.map(state => stateProxy(state.get())) // we also need to include mutable (LET) variables here
+    const stateProxies = targets.map(state => stateProxy(state[reactiveSymbol].getter())) // we also need to include mutable (LET) variables here
     mutator(finalizer, ...stateProxies, ...otherValues, ...args.map(liftValue))
   }
 }

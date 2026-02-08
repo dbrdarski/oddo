@@ -8,8 +8,9 @@ export {
   stateProxy,
   lift,
   liftFn,
+  // liftValue,
   arraySplice
-} from "./reactive.mjs"
+} from "./framework/reactive.mjs"
 
 export {
   createElement,
@@ -22,4 +23,4 @@ export {
   createJsxExpression as x,
   mount,
   hydrate
-} from "./dom.mjs";
+} from "./framework/dom.mjs";

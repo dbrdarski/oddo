@@ -8,7 +8,7 @@ const htmlEventList = new Set(htmlEventHandlers)
 const hydrateAttributes = (element, attrs) => {
   for (const key in attrs) {
     const maybeContainerValue = attrs[key]
-    const value = maybeContainerValue?.[reactiveSymbol] ? maybeContainerValue.get() : maybeContainerValue;
+    const value = maybeContainerValue?.[reactiveSymbol]?.getter() ?? maybeContainerValue;
     key === "ref" && value(element)
     htmlEventList.has(key) && (element[key] = value)
     value?.[reactiveSymbol] && effect2((value) => setAttribute(element, key, value(), oldValue), [value], false)

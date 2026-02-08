@@ -1,0 +1,21 @@
+// TEST: Mimicking Portal structure exactly
+import { mount } from "@oddo/ui"
+
+@component TestPortalLike = ({ props: { to }, children }) => {
+  container = document.createElement("div")
+  container.style.cssText := "position: fixed;"
+  
+  this.onMount(() => {
+    (to ?? document.body).appendChild(container)
+    mount(container, <>{children}</>)
+  })
+
+  this.onCleanup(() => {
+    container.remove()
+  })
+
+  return null
+}
+
+export default TestPortalLike
+

@@ -1,0 +1,99 @@
+// TEST CASES: Reactive values in nested scopes
+// Compile this and examine the output
+
+@component TestCases = ({ props: { a, b, c } }) => {
+
+  // CASE 1: Both used in parent scope only (no nesting)
+  case1 = () => {
+    x = a + b
+    return x
+  }
+
+  // CASE 2: Both used in child scope only
+  case2 = () => {
+    inner = () => {
+      return a + b
+    }
+    return inner
+  }
+
+  // CASE 3: One in parent, one in child
+  case3 = () => {
+    x = a
+    inner = () => {
+      return b
+    }
+    return x + inner()
+  }
+
+  // CASE 4: Same value used in both parent and child
+  case4 = () => {
+    x = a
+    inner = () => {
+      return a + 1
+    }
+    return x + inner()
+  }
+
+  // CASE 5: Three levels deep, different values at each level
+  case5 = () => {
+    x = a
+    level1 = () => {
+      y = b
+      level2 = () => {
+        return c
+      }
+      return y + level2()
+    }
+    return x + level1()
+  }
+
+  // CASE 6: Callback passed to external function (like onMount)
+  case6 = () => {
+    someExternalFn(() => {
+      return a + b
+    })
+  }
+
+  // CASE 7: Callback with mixed - some in callback, some outside
+  case7 = () => {
+    x = a
+    someExternalFn(() => {
+      return b + c
+    })
+    return x
+  }
+
+  // CASE 8: Value used in conditional inside callback
+  case8 = () => {
+    someExternalFn(() => {
+      return a ? b : c
+    })
+  }
+
+  // CASE 9: No reactive values at all (baseline)
+  case9 = () => {
+    inner = () => {
+      return 42
+    }
+    return inner()
+  }
+
+  // CASE 10: Reactive value only in deeply nested, not in intermediate
+  case10 = () => {
+    level1 = () => {
+      level2 = () => {
+        return a
+      }
+      return level2()
+    }
+    return level1()
+  }
+
+  return null
+}
+
+someExternalFn = (fn) => fn()
+
+export default TestCases
+

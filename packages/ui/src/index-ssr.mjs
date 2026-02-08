@@ -7,8 +7,9 @@ export {
   stateProxy,
   lift,
   liftFn,
+  // liftValue,
   arraySplice
-} from "./reactive.mjs"
+} from "./framework/reactive.mjs"
 
 export const effect = () => {}
 export const mount = () => {}
@@ -24,4 +25,4 @@ export {
   createJsxExpression,
   createJsxExpression as x,
   render
-} from "./ssr.mjs";
+} from "./framework/ssr.mjs";

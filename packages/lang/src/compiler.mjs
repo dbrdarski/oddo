@@ -1383,7 +1383,8 @@ function convertExpressionStatement(stmt) {
                         stmt.expression.type !== 'arraySliceAssignment';
     
     if (isPlainExpr) {
-      const allIdentifiers = collectOddoIdentifiersOnly(stmt.expression);
+      // Stop at arrow functions - each handles its own reactive deps via _liftFn
+      const allIdentifiers = collectOddoIdentifiersOnly(stmt.expression, new Set(), false, true);
       const reactiveDeps = allIdentifiers.filter(id => isReactive(id));
       
       if (reactiveDeps.length > 0) {
@@ -1796,11 +1797,16 @@ function convertReactiveContainer(expr) {
 }
 
 // Helper: collect identifiers from Oddo AST without side effects
-function collectOddoIdentifiersOnly(node, names = new Set(), stopAtJsxExpressions = false) {
+function collectOddoIdentifiersOnly(node, names = new Set(), stopAtJsxExpressions = false, stopAtArrowFunctions = false) {
   if (!node || typeof node !== 'object') return Array.from(names);
 
   // Stop at jsxExpression boundaries - each is its own reactivity scope
   if (stopAtJsxExpressions && node.type === 'jsxExpression') {
+    return Array.from(names);
+  }
+
+  // Stop at arrow function boundaries - each handles its own reactive deps
+  if (stopAtArrowFunctions && node.type === 'arrowFunction') {
     return Array.from(names);
   }
 
@@ -1811,10 +1817,10 @@ function collectOddoIdentifiersOnly(node, names = new Set(), stopAtJsxExpression
   // Special handling for object properties - key is not a reference unless computed
   if (node.type === 'property') {
     if (node.computed && node.key) {
-      collectOddoIdentifiersOnly(node.key, names, stopAtJsxExpressions);
+      collectOddoIdentifiersOnly(node.key, names, stopAtJsxExpressions, stopAtArrowFunctions);
     }
     if (node.value) {
-      collectOddoIdentifiersOnly(node.value, names, stopAtJsxExpressions);
+      collectOddoIdentifiersOnly(node.value, names, stopAtJsxExpressions, stopAtArrowFunctions);
     }
     return Array.from(names);
   }
@@ -1823,9 +1829,9 @@ function collectOddoIdentifiersOnly(node, names = new Set(), stopAtJsxExpression
     if (key === 'type') continue;
     const val = node[key];
     if (Array.isArray(val)) {
-      val.forEach(item => collectOddoIdentifiersOnly(item, names, stopAtJsxExpressions));
+      val.forEach(item => collectOddoIdentifiersOnly(item, names, stopAtJsxExpressions, stopAtArrowFunctions));
     } else if (val && typeof val === 'object') {
-      collectOddoIdentifiersOnly(val, names, stopAtJsxExpressions);
+      collectOddoIdentifiersOnly(val, names, stopAtJsxExpressions, stopAtArrowFunctions);
     }
   }
   return Array.from(names);

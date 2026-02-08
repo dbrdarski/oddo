@@ -1,0 +1,32 @@
+// TEST: Direct in body vs wrapped in function
+import { mount } from "@oddo/ui"
+
+@component TestDirect = ({ props: { to }, children }) => {
+  container = document.createElement("div")
+  
+  // DIRECTLY in component body - this is what Portal does
+  this.onMount(() => {
+    (to ?? document.body).appendChild(container)
+    mount(container, <>{children}</>)
+  })
+
+  return null
+}
+
+@component TestWrapped = ({ props: { to }, children }) => {
+  container = document.createElement("div")
+  
+  // WRAPPED in a function first
+  setup = () => {
+    this.onMount(() => {
+      (to ?? document.body).appendChild(container)
+      mount(container, <>{children}</>)
+    })
+  }
+  
+  setup()
+  return null
+}
+
+export { TestDirect, TestWrapped }
+

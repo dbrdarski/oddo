@@ -328,7 +328,7 @@ ${bundledCode}
       })
       res.end(fullHtml)
     } catch (err) {
-      console.error(`  ❌ SSR Error: ${err.message}`)
+      console.error(`  ❌ SSR Error: ${err.message}`, err)
       res.writeHead(500, { 'Content-Type': 'text/plain' })
       res.end('Server Error')
     }

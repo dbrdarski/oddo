@@ -1,0 +1,57 @@
+// TEST CASES: Reactive values with lifecycle hooks
+// Comparing this.onMount vs regular callbacks
+
+@component TestLifecycle = ({ props: { a, b } }) => {
+
+  // CASE A: this.onMount with reactive values
+  caseA = () => {
+    this.onMount(() => {
+      console.log(a + b)
+    })
+  }
+
+  // CASE B: this.onCleanup with reactive values  
+  caseB = () => {
+    this.onCleanup(() => {
+      console.log(a + b)
+    })
+  }
+
+  // CASE C: Regular callback (for comparison)
+  caseC = () => {
+    setTimeout(() => {
+      console.log(a + b)
+    }, 100)
+  }
+
+  // CASE D: this.onMount with one value in outer, one in callback
+  caseD = () => {
+    x = a
+    this.onMount(() => {
+      console.log(b)
+    })
+    return x
+  }
+
+  // CASE E: this.onMount with NO reactive values
+  caseE = () => {
+    this.onMount(() => {
+      console.log("hello")
+    })
+  }
+
+  // CASE F: Nested this.onMount (weird but let's see)
+  caseF = () => {
+    this.onMount(() => {
+      inner = () => {
+        return a
+      }
+      console.log(inner())
+    })
+  }
+
+  return null
+}
+
+export default TestLifecycle
+

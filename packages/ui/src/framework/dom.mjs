@@ -75,7 +75,7 @@ export const createComponent = (component, attrs, ...children) => (parent, oldNo
   const { dispose, subscribe, onCleanup } = cleanupContext(currentContext)
   const prevContext = currentContext
   currentContext = subscribe
-  const props = createAccessor(attrs?.[reactiveSymbol] ? attrs.get() : attrs)
+  const props = createAccessor(attrs?.[reactiveSymbol]?.getter() ?? attrs)
   const expressionOrVdom = component.call({ onCleanup, onMount: fn => initializers.push(fn) }, { props, children })
   const nodeCleanup = render(expressionOrVdom)(parent, oldNodeCleanup)
   currentContext = prevContext

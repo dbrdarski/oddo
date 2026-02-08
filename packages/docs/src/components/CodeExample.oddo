@@ -2,6 +2,7 @@ import { highlightOddo } from "@oddo/lang"
 import { ref } from "@oddo/ui"
 
 export default ({ props: { code } }) => {
+  console.log({ code })
   codeElement = ref()
 
   @effect () => {
