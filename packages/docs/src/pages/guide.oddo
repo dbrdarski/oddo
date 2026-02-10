@@ -7,7 +7,7 @@ import code5 from "./guide/code5"
 import { A } from "@oddo/router"
 import CodeExample from "../components/CodeExample"
 
-GuidePage = () => {
+@component GuidePage = () => {
   atSign = "@"
 
   return <div class="doc-page">

@@ -2,7 +2,7 @@
 // This is the initial basic implementation or router. It doesn't even support nested routes.
 
 import * as urlRouterModule from "url-router"
-import { createElement, createJsxExpression, computed, state, lift } from "@oddo/ui"
+import { createElement, createJsxExpression, computed, state, lift, liftFn } from "@oddo/ui"
 
 const UrlRouter = urlRouterModule.default || urlRouterModule
 
@@ -17,19 +17,20 @@ export const withSSR = (app) => (path) => {
 let navigate = null
 
 export const Router = ({ props: { routes, ...props } }) => {
-  const router = new UrlRouter(routes())
+  console.log({ routes, props })
+  const router = computed(routes => new UrlRouter(routes()), [routes])
   const isSSR = typeof window === "undefined"
   const url = isSSR ? ssrPath : window.location.pathname + window.location.search
-  const initialRoute = router.find(url)
+  const initialRoute = lift(router => router().find(url), [router])
   const [currentRoute, setCurrentRoute] = state(initialRoute)
 
   if (!isSSR) {
     window.history.replaceState({ href: url }, "", url)
 
-    navigate = (href) => {
+    navigate = liftFn((router, href) => {
       const route = router.find(href)
       setCurrentRoute(route)
-    }
+    }, [router])
 
     window.addEventListener('popstate', (event) => {
       if (event.state?.href) {

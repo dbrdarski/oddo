@@ -7,7 +7,7 @@ import operatorsExample from "./playground/operators"
 import jsxExample from "./playground/jsx"
 import modifiersExample from "./playground/modifiers"
 
-Playground = () => {
+@component Playground = () => {
   @state input = ""
   @state output = "// Output will appear here..."
   @state outputMode = "js"

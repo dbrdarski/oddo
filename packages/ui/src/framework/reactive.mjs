@@ -133,22 +133,40 @@ export const stateProxy = (target, mutable, notifyParent) => {
   return () => target
 }
 
+const getter = (target, key) => {
+}
+
 export const createAccessor = (target) => {
   if (target && typeof target === "object") {
     const children = new Map()
-    return new Proxy(noop, {
-      apply () {
-        return target
-      },
+    return new Proxy(target, {
       deleteProperty () {},
       set () {
         return false
       },
-      get (_, key) {
+      get(_, key) {
+        if (key === reactiveSymbol) {
+          return target[reactiveSymbol]
+        }
         if (!children.has(key)) {
-          const propertyValue = Reflect.get(target, key, target)
-          const value = (!target.hasOwnProperty(key) && typeof propertyValue === "function") ? propertyValue.bind(target) : propertyValue
-          children.set(key, createAccessor(value?.[reactiveSymbol]?.getter() ?? value))
+          if (target?.[reactiveSymbol]) {
+            let childExpressionIsAccessor
+            const expr = computed((target) => {
+              const value = Reflect.get(target(), key, target())
+              childExpressionIsAccessor = value && typeof value === "object"
+              return (!target().hasOwnProperty(key) && typeof value === "function") ? value.bind(target()) : value
+            }, [target])
+            children.set(key, childExpressionIsAccessor ? createAccessor(expr) : expr)
+          } else {
+            const value = Reflect.get(target, key, target)
+            children.set(key, (value && typeof value === "object")
+              ? createAccessor(value)
+              : (!target.hasOwnProperty(key) && typeof value === "function") ? value.bind(target) : value
+            )
+            // children.set(key, createAccessor(
+            //   (!target.hasOwnProperty(key) && typeof value === "function") ? value.bind(target) : value
+            // ))
+          }
         }
         return children.get(key)
       }

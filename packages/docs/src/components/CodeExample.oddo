@@ -1,8 +1,8 @@
 import { highlightOddo } from "@oddo/lang"
 import { ref } from "@oddo/ui"
 
-export default ({ props: { code } }) => {
-  console.log({ code })
+@component CodeExample = ({ props: { code } }) => {
+  console.log("CODE", { code })
   codeElement = ref()
 
   @effect () => {
@@ -14,3 +14,5 @@ export default ({ props: { code } }) => {
       <code ref={codeElement}>{code}</code>
     </pre>
 }
+
+export default CodeExample

@@ -21,7 +21,7 @@ export const createElement = (tag, attrs, ...children) => () =>
 
 export const createComponent = (component, attrs, ...children) => () => {
   // const initializers = []
-  const props = createAccessor(attrs?.[reactiveSymbol]?.getter() ?? attrs)
+  const props = createAccessor(attrs)
   const expressionOrVdom = component.call({ onCleanup: noop, onMount: noop /* fn => initializers.push(fn) */ }, { props, children })
   return render(expressionOrVdom)
 }
