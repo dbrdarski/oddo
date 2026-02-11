@@ -6,6 +6,7 @@ import primitivesExample from "./playground/primitives"
 import operatorsExample from "./playground/operators"
 import jsxExample from "./playground/jsx"
 import modifiersExample from "./playground/modifiers"
+import componentsExample from "./playground/components"
 
 @component Playground = () => {
   @state input = ""
@@ -132,7 +133,8 @@ import modifiersExample from "./playground/modifiers"
     primitives: primitivesExample,
     operators: operatorsExample,
     jsx: jsxExample,
-    modifiers: modifiersExample
+    modifiers: modifiersExample,
+    components: componentsExample
   }
 
   // Load example
@@ -222,6 +224,7 @@ import modifiersExample from "./playground/modifiers"
             <option value="operators">Operators</option>
             <option value="jsx">JSX</option>
             <option value="modifiers">Modifiers</option>
+            <option value="components">Components</option>
           </select>
         </div>
         <div class="panel-content">

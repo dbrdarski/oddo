@@ -1,0 +1,73 @@
+export default `import { mount } from "@oddo/ui"
+
+@component Portal = ({ props: { to }, children }) => {
+  container = document.createElement("div")
+  container.style.cssText := "position: fixed; top: 0; left: 0; z-index: 9999;"
+
+  this.onMount(() => {
+    (to ?? document.body).appendChild(container)
+    mount(container, <>{children}</>)
+  })
+
+  this.onCleanup(() => {
+    container.remove()
+  })
+
+  return null
+}
+
+backdropStyle = "position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 10000;"
+
+contentStyle = "position: relative; flex-direction: column; display: flex; background: white; box-shadow: 0 0 0 1px #39f8 inset, 4px 4px 0px #09f3; padding: 18px 22px; border-radius: 5px; min-height: 20vh; min-width: 30vw; max-width: 90vw; max-height: 90vh; overflow: auto; margin-left: 260px;"
+
+@component Modal = ({ props: {
+  open, onClose, title, actions, onSubmit, ...props
+}, children }) => {
+  console.log("initial", { open })
+  @effect () => {
+    console.log("current", { open })
+  }
+
+  handleBackdropClick = (e) => {
+    e.target == e.currentTarget ? onClose?.() : null
+  }
+
+  handleSubmit = (e) => {
+    e.preventDefault()
+    onSubmit?.(e)
+  }
+
+  return <div> { open && <div to={document.body}>
+    <Portal style={backdropStyle} onclick={handleBackdropClick}>
+      <form
+        {...props}
+        style={contentStyle}
+        onsubmit={handleSubmit}
+      >
+        <div style="text-transform: uppercase; color: #09f; font-size: 16px;">{title}</div>
+        <div style="display: flex; flex-direction: column; flex-grow: 1; padding: 30px 0; gap: 10px; color: #555; font-size: 16px;">{children} MODAL</div>
+        <div style="display: flex; gap: 10px">
+          <span style="flex-grow: 1"></span>
+          {actions?.()}
+        </div>
+      </form>
+    </div>
+  </Portal> : null }</div>
+}
+
+@component App = () => {
+  @state [showModal, setShowModal] = false
+  @effect () => {
+     console.log({ showModal })
+  }
+  return (<div>
+     <button onclick={() => {
+console.log(true)
+setShowModal(true)}
+}>Show modal</button>
+     <Modal open={showModal}>{1}</Modal>
+    { showModal && <div>asdf</div> }
+  </div>)
+}
+
+mount(document.body, <App />)`

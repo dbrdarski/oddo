@@ -39,8 +39,8 @@ export const computed = (fn, deps) => {
   deps = bindDependencies(deps, () => (cached = false, notify()))
 
   return new ReactiveContainer(function computed (caller) {
+    caller && subscribe(caller)
     if (!cached) {
-      caller && subscribe(caller)
       cache = fn(...deps)
       cached = true
     }
