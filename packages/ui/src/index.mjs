@@ -24,3 +24,5 @@ export {
   mount,
   hydrate
 } from "./framework/dom.mjs";
+
+export { default as Portal } from "./components/Portal.mjs"

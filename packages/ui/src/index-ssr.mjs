@@ -14,6 +14,7 @@ export {
 export const effect = () => {}
 export const mount = () => {}
 export const hydrate = () => {}
+export const Portal = () => {}
 
 export {
   createElement,
