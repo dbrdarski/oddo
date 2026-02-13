@@ -1,20 +1,4 @@
-export default `import { mount } from "@oddo/ui"
-
-@component Portal = ({ props: { to }, children }) => {
-  container = document.createElement("div")
-  container.style.cssText := "position: fixed; top: 0; left: 0; z-index: 9999;"
-
-  this.onMount(() => {
-    (to ?? document.body).appendChild(container)
-    mount(container, <>{children}</>)
-  })
-
-  this.onCleanup(() => {
-    container.remove()
-  })
-
-  return null
-}
+export default `import { mount, Portal } from "@oddo/ui"
 
 backdropStyle = "position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; z-index: 10000;"
 
@@ -23,10 +7,6 @@ contentStyle = "position: relative; flex-direction: column; display: flex; backg
 @component Modal = ({ props: {
   open, onClose, title, actions, onSubmit, ...props
 }, children }) => {
-  console.log("initial", { open })
-  @effect () => {
-    console.log("current", { open })
-  }
 
   handleBackdropClick = (e) => {
     e.target == e.currentTarget ? onClose?.() : null
@@ -38,7 +18,7 @@ contentStyle = "position: relative; flex-direction: column; display: flex; backg
   }
 
   return <div> { open && <div to={document.body}>
-    <Portal style={backdropStyle} onclick={handleBackdropClick}>
+    <Portal style={backdropStyle} onclick={handleBackdropClick} {...{}}>
       <form
         {...props}
         style={contentStyle}
@@ -52,17 +32,13 @@ contentStyle = "position: relative; flex-direction: column; display: flex; backg
         </div>
       </form>
     </div>
-  </Portal> : null }</div>
+  </Portal> }</div>
 }
 
 @component App = () => {
   @state [showModal, setShowModal] = false
-  @effect () => {
-     console.log({ showModal })
-  }
   return (<div>
      <button onclick={() => {
-console.log(true)
 setShowModal(true)}
 }>Show modal</button>
      <Modal open={showModal}>{1}</Modal>

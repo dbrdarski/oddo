@@ -17,7 +17,6 @@ export const withSSR = (app) => (path) => {
 let navigate = null
 
 export const Router = ({ props: { routes, ...props } }) => {
-  console.log({ routes, props })
   const router = computed(routes => new UrlRouter(routes()), [routes])
   const isSSR = typeof window === "undefined"
   const url = isSSR ? ssrPath : window.location.pathname + window.location.search

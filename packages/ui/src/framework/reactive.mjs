@@ -31,7 +31,7 @@ export const state = (state) => {
 }
 
 export const bindDependencies = (deps, cleanup) =>
-  deps.map(dep => dep?.[reactiveSymbol]?.getter?.bind(null, cleanup) ?? (() => dep))
+  deps.map(dep => dep?.[reactiveSymbol] ? dep?.[reactiveSymbol]?.getter?.bind(null, cleanup) : () => dep)
 
 export const computed = (fn, deps) => {
   const { subscribe, notify } = observable()
@@ -39,8 +39,8 @@ export const computed = (fn, deps) => {
   deps = bindDependencies(deps, () => (cached = false, notify()))
 
   return new ReactiveContainer(function computed (caller) {
-    caller && subscribe(caller)
     if (!cached) {
+      caller && subscribe(caller)
       cache = fn(...deps)
       cached = true
     }
@@ -86,7 +86,7 @@ const mutateSymbol = Symbol()
 const noop = () => { }
 const splice = Array.prototype.splice
 export const arraySplice = (target, ...args) =>
-  (args.length && splice.apply(target[mutateSymbol]?.() ?? target, args), target)
+  (args.length && splice.apply(target[mutateSymbol] ? target[mutateSymbol]?.() : target, args), target)
 
 export const stateProxy = (target, mutable, notifyParent) => {
   if (target && typeof target === "object") {
@@ -133,9 +133,6 @@ export const stateProxy = (target, mutable, notifyParent) => {
   return () => target
 }
 
-const getter = (target, key) => {
-}
-
 export const createAccessor = (target) => {
   if (target && typeof target === "object") {
     const children = new Map()
@@ -156,6 +153,7 @@ export const createAccessor = (target) => {
               childExpressionIsAccessor = value && typeof value === "object"
               return (!target().hasOwnProperty(key) && typeof value === "function") ? value.bind(target()) : value
             }, [target])
+            liftValue(expr)
             children.set(key, childExpressionIsAccessor ? createAccessor(expr) : expr)
           } else {
             const value = Reflect.get(target, key, target)
@@ -163,9 +161,6 @@ export const createAccessor = (target) => {
               ? createAccessor(value)
               : (!target.hasOwnProperty(key) && typeof value === "function") ? value.bind(target) : value
             )
-            // children.set(key, createAccessor(
-            //   (!target.hasOwnProperty(key) && typeof value === "function") ? value.bind(target) : value
-            // ))
           }
         }
         return children.get(key)
@@ -175,7 +170,7 @@ export const createAccessor = (target) => {
   return target
 }
 
-const liftValue = arg => arg?.[reactiveSymbol]?.getter() ?? arg
+export const liftValue = arg => arg?.[reactiveSymbol] ? arg[reactiveSymbol].getter() : arg
 const empty = Object.freeze([])
 
 export const mutate = (mutator, targets, otherValues = empty) => {
