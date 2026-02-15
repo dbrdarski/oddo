@@ -126,7 +126,10 @@ export const createTextElement = (text) => (parent, oldNodeCleanup) => {
 }
 
 export const mount = (root, jsx) => {
+  const wasHydrating = hydrating
+  hydrating = false
   render(jsx)(root)
+  hydrating = wasHydrating
 }
 
 let hydrating = false

@@ -172,21 +172,23 @@ function renderPath(renderApp, pathname) {
   return html
 }
 
-function injectIntoTemplate(appHtml) {
-  const templatePath = path.join(PUBLIC_DIR, 'index.html')
-  const template = fs.readFileSync(templatePath, 'utf-8')
-
-  // Replace the empty #app div with the rendered content
-  const html = template.replace(
-    '<div id="app"></div>',
-    `<div id="app">${appHtml}</div>`
-  )
-
-  // Replace the SPA script with the hydration client script
-  return html.replace(
-    '<script src="./app.js"></script>',
-    '<script type="module" src="./client.js"></script>'
-  )
+function buildSSRHtml(appHtml) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oddo - Language &amp; Framework</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">${appHtml}</div>
+  <script type="module" src="/client.js"></script>
+</body>
+</html>`
 }
 
 const MIME_TYPES = {
@@ -318,7 +320,7 @@ ${bundledCode}
     // SSR render the requested route
     try {
       const appHtml = renderPath(renderApp, url.pathname)
-      const fullHtml = injectIntoTemplate(appHtml)
+      const fullHtml = buildSSRHtml(appHtml)
 
       console.log(`  ✅ SSR: ${url.pathname} (${appHtml.length} chars)`)
 

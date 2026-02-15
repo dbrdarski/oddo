@@ -10,7 +10,7 @@ const hydrateAttributes = (element, attrs) => {
     const maybeContainerValue = attrs[key]
     const value = maybeContainerValue?.[reactiveSymbol]?.getter() ?? maybeContainerValue;
     key === "ref" && value(element)
-    htmlEventList.has(key) && (element[key] = value)
+    element && htmlEventList.has(key) && (element[key] = value)
     value?.[reactiveSymbol] && effect2((value) => setAttribute(element, key, value(), oldValue), [value], false)
   }
 }

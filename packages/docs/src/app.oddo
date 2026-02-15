@@ -30,10 +30,11 @@ App = () => {
     <main class="main-content">
       <Router
         routes={{
-          "/": <GuidePage />,
-          "/api": <APIPage />,
-          "/playground": <Playground />,
-          "(.*)": "Not found"
+          "/": () => <GuidePage />,
+          "/api": () => <APIPage />,
+          "/playground": () => <Playground />,
+          "/playground/:id": ({ id }) => <Playground id={id}/>,
+          "(.*)": () => "Not found"
         }}
       />
     </main>

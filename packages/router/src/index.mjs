@@ -38,7 +38,7 @@ export const Router = ({ props: { routes, ...props } }) => {
     })
   }
 
-  return createJsxExpression(currentRoute => currentRoute()?.handler, [currentRoute])
+  return createJsxExpression(currentRoute => currentRoute()?.handler(currentRoute()?.params), [currentRoute])
 }
 
 const push = (href) => {
