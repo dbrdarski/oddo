@@ -1486,8 +1486,11 @@ function convertTemplateLiteralFromToken(token) {
             // Found matching }
             const exprText = text.substring(exprStart, pos);
             // Parse the expression using parseOddoExpression
+            // Save/restore sourceText since parseOddoExpression overwrites it
             try {
+              const savedSourceText = sourceText;
               const exprAST = parseOddoExpression(exprText);
+              sourceText = savedSourceText;
               expressions.push(exprAST);
             } catch (e) {
               // If parsing fails, create an error node

@@ -776,6 +776,104 @@ test('JSX whitespace: original bug report ({actionLabel} {ternary})', () => {
   assert(js.includes('" "'), 'Should have space between actionLabel expression and ternary expression');
 });
 
+test('JSX whitespace: template literal with ${} does not corrupt sourceText', () => {
+  const input = `style = ({ flat, size }) => \`\${3}\`
+App = () => <Btn type="link" href="/entities/casinos/new">
+  Create new {2}
+</Btn>`;
+  const js = compileOddoToJS(input);
+  assert(js.includes('"Create new "'), 'Text child "Create new " must be preserved when template literal with ${} exists earlier in source');
+  assert(js.includes(', 2)'), 'Expression child {2} must also be preserved');
+});
+
+// --- Template literal + sourceText corruption edge cases ---
+console.log('\n--- Template Literal sourceText Corruption Edge Cases ---');
+
+test('TL corruption: template literal with ${} before simple JSX text', () => {
+  const js = compileOddoToJS('a = `${x}`\nb = <div>hello</div>');
+  assert(js.includes('"hello"'), 'Simple text child must survive template literal');
+});
+
+test('TL corruption: multiple ${} in template before JSX', () => {
+  const js = compileOddoToJS('a = `${x} and ${y}`\nb = <div>hello world</div>');
+  assert(js.includes('"hello world"'), 'Text child must survive multiple template expressions');
+});
+
+test('TL corruption: nested template literal before JSX', () => {
+  const js = compileOddoToJS('a = `outer ${`inner ${z}`}`\nb = <div>preserved</div>');
+  assert(js.includes('"preserved"'), 'Text child must survive nested template literals');
+});
+
+test('TL corruption: template literal in JSX attribute value', () => {
+  const js = compileOddoToJS('x := <div style={`color: ${c}`}>text here</div>');
+  assert(js.includes('"text here"'), 'Text child must survive template literal in JSX attribute');
+});
+
+test('TL corruption: template literal inside JSX expression child', () => {
+  const js = compileOddoToJS('x := <div>{`hello ${name}`} world</div>');
+  assert(js.includes('" world"'), 'Text after template literal expression must be preserved');
+});
+
+test('TL corruption: template literal with ${} between two JSX elements', () => {
+  const js = compileOddoToJS('a = `${1}`\nb = <div>first</div>\nc = `${2}`\nd = <div>second</div>');
+  assert(js.includes('"first"'), 'First JSX text must survive');
+  assert(js.includes('"second"'), 'Second JSX text must survive after second template literal');
+});
+
+test('TL corruption: template literal before JSX with whitespace between children', () => {
+  const js = compileOddoToJS('a = `${x}`\nb = <div>{a} {b}</div>');
+  assert(js.includes('" "'), 'Whitespace between expressions must be preserved after template literal');
+});
+
+test('TL corruption: template literal before JSX with text+expression children', () => {
+  const js = compileOddoToJS('a = `${x}`\nb = <div>Hello {name}!</div>');
+  assert(js.includes('"Hello "'), '"Hello " must be preserved after template literal');
+  assert(js.includes('"!"'), '"!" must be preserved after template literal');
+});
+
+test('TL corruption: template literal before multiline JSX', () => {
+  const input = `a = \`\${x}\`
+b = <div>
+  line one {expr} line two
+</div>`;
+  const js = compileOddoToJS(input);
+  assert(js.includes('"line one "'), '"line one " text must be preserved');
+  assert(js.includes('" line two"'), '" line two" text must be preserved');
+});
+
+test('TL corruption: empty template literal does not corrupt sourceText', () => {
+  const js = compileOddoToJS('a = ``\nb = <div>safe text</div>');
+  assert(js.includes('"safe text"'), 'Empty template literal should not affect JSX text');
+});
+
+test('TL corruption: template literal without ${} does not corrupt sourceText', () => {
+  const js = compileOddoToJS('a = `just text`\nb = <div>also safe</div>');
+  assert(js.includes('"also safe"'), 'Template literal without expressions should not affect JSX text');
+});
+
+test('TL corruption: template literal with complex expression before JSX', () => {
+  const js = compileOddoToJS('a = `${obj.method(1, 2)}`\nb = <div>still works</div>');
+  assert(js.includes('"still works"'), 'Complex template expression must not corrupt sourceText');
+});
+
+test('TL corruption: template literal in ternary inside JSX expression', () => {
+  const js = compileOddoToJS('x := <span>{active ? `${name}` : "none"} is selected</span>');
+  assert(js.includes('" is selected"'), 'Text after ternary with template literal must be preserved');
+});
+
+test('TL corruption: multiple JSX elements after template literal', () => {
+  const js = compileOddoToJS('a = `${x}`\nb = <div>one {1} two {2} three</div>');
+  assert(js.includes('"one "'), '"one " text must be preserved');
+  assert(js.includes('" two "'), '" two " text must be preserved');
+  assert(js.includes('" three"'), '" three" text must be preserved');
+});
+
+test('TL corruption: template literal before JSX with element+expression+text', () => {
+  const js = compileOddoToJS('a = `${x}`\nb = <div><span /> {y} text</div>');
+  assert(js.includes('" "'), 'Space between element and expression must be preserved');
+  assert(js.includes('" text"'), '" text" must be preserved');
+});
+
 if (testsFailed > 0) {
   console.log('\n=== Failures ===');
   failures.forEach(({ name, error }) => {
