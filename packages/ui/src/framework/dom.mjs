@@ -75,7 +75,7 @@ export const createComponent = (component, attrs, ...children) => (parent, oldNo
   const { dispose, subscribe, onCleanup } = cleanupContext(currentContext)
   const prevContext = currentContext
   currentContext = subscribe
-  const props = createAccessor(attrs)
+  const props = createAccessor(attrs ?? {})
   const expressionOrVdom = component.call({ onCleanup, onMount: fn => initializers.push(fn) }, { props, children })
   const nodeCleanup = render(expressionOrVdom)(parent, oldNodeCleanup)
   currentContext = prevContext
@@ -133,7 +133,7 @@ export const mount = (root, jsx) => {
 }
 
 let hydrating = false
-export const hydrate = (root, jsx) => {
+export const hydrate = ( root, jsx) => {
   hydrating = true
   walk = domWalker(root.childNodes)
   render(jsx)(root)

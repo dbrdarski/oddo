@@ -103,7 +103,7 @@ export const createAttributes = props => props
   : ""
 
 
-const printAttribute = (key, value) => ` ${key}="${String(value).replaceAll("\"", "\\\"")}"`
-const createAttribute = ([key, value]) => (htmlEventList.has(key) || key === "ref") ? "" : value?.[reactiveSymbol]
-  ? lift(value => printAttribute(key, value()), [value])
-  : printAttribute(key, value)
+const printAttribute = (key, value) => (value === true) ? ` ${key}` : ` ${key}="${String(value).replaceAll("\"", "\\\"")}"`
+const createAttribute = ([key, value]) => (htmlEventList.has(key) || key === "ref" || value === false || value == null)
+  ? ""
+  : value?.[reactiveSymbol] ? lift(value => printAttribute(key, value()), [value]) : printAttribute(key, value)
