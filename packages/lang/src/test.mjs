@@ -684,6 +684,98 @@ test('JSX element with hyphenated name and attributes', () => {
   assert(ast.attributes[0].name === 'className', 'Attribute name should be className');
 });
 
+// JSX whitespace between children - comprehensive edge cases
+console.log('\n--- JSX Whitespace Edge Cases ---');
+
+// Helper: compile a JSX expression wrapped in an assignment statement
+function compileJSX(jsx) {
+  return compileOddoToJS('x := ' + jsx);
+}
+
+test('JSX whitespace: two expressions with single space', () => {
+  const js = compileJSX('<div>{a} {b}</div>');
+  assert(js.includes('" "'), 'Should have space string between expressions');
+});
+
+test('JSX whitespace: two expressions with multiple spaces (normalized)', () => {
+  const js = compileJSX('<div>{a}  {b}</div>');
+  assert(js.includes('" "'), 'Should normalize multiple spaces to single space string');
+});
+
+test('JSX whitespace: two expressions with no space', () => {
+  const js = compileJSX('<div>{a}{b}</div>');
+  assert(!js.includes('" "'), 'Should NOT have space string when no whitespace between expressions');
+});
+
+test('JSX whitespace: two expressions separated by newline (no space)', () => {
+  const js = compileJSX('<div>{a}\n  {b}</div>');
+  assert(!js.includes('" "'), 'Should NOT insert space for newline+indent between expressions');
+});
+
+test('JSX whitespace: text then expression (trailing space merged into text)', () => {
+  const js = compileJSX('<div>text {a}</div>');
+  assert(js.includes('"text "'), 'Text node should include trailing space');
+});
+
+test('JSX whitespace: expression then text (leading space merged into text)', () => {
+  const js = compileJSX('<div>{a} text</div>');
+  assert(js.includes('" text"'), 'Text node should include leading space');
+});
+
+test('JSX whitespace: expression, text, expression (spaces merged into text)', () => {
+  const js = compileJSX('<div>{a} text {b}</div>');
+  assert(js.includes('" text "'), 'Text node should absorb spaces on both sides');
+});
+
+test('JSX whitespace: text then two expressions', () => {
+  const js = compileJSX('<div>text {a} {b}</div>');
+  assert(js.includes('"text "'), 'Text should include trailing space');
+  assert(js.includes('" "'), 'Should have space between the two expressions');
+});
+
+test('JSX whitespace: two expressions then text', () => {
+  const js = compileJSX('<div>{a} {b} text</div>');
+  assert(js.includes('" "'), 'Should have space between the two expressions');
+  assert(js.includes('" text"'), 'Text should include leading space');
+});
+
+test('JSX whitespace: three consecutive expressions with spaces', () => {
+  const js = compileJSX('<div>{a} {b} {c}</div>');
+  const spaceCount = (js.match(/" "/g) || []).length;
+  assert(spaceCount === 2, `Should have exactly 2 space strings between 3 expressions, got ${spaceCount}`);
+});
+
+test('JSX whitespace: element then expression with space', () => {
+  const js = compileJSX('<div><span /> {a}</div>');
+  assert(js.includes('" "'), 'Should have space between element and expression');
+});
+
+test('JSX whitespace: expression then element with space', () => {
+  const js = compileJSX('<div>{a} <span /></div>');
+  assert(js.includes('" "'), 'Should have space between expression and element');
+});
+
+test('JSX whitespace: two elements with space', () => {
+  const js = compileJSX('<div><span /> <span /></div>');
+  assert(js.includes('" "'), 'Should have space between two elements');
+});
+
+test('JSX whitespace: tab between expressions', () => {
+  const js = compileJSX('<div>{a}\t{b}</div>');
+  assert(js.includes('" "'), 'Tab should be normalized to space string');
+});
+
+test('JSX whitespace: classic interpolation (Hello {name}!)', () => {
+  const js = compileJSX('<div>Hello {name}!</div>');
+  assert(js.includes('"Hello "'), 'Should have "Hello " with trailing space');
+  assert(js.includes('"!"'), 'Should have "!" text node');
+});
+
+test('JSX whitespace: original bug report ({actionLabel} {ternary})', () => {
+  const js = compileOddoToJS('x := <h3 style="margin-top: 0">{actionLabel} {casino.name ? `${casino.name}` : "new casino"}</h3>');
+  assert(js.includes('" "'), 'Should have space between actionLabel expression and ternary expression');
+});
+
 if (testsFailed > 0) {
   console.log('\n=== Failures ===');
   failures.forEach(({ name, error }) => {

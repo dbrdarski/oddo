@@ -2040,39 +2040,57 @@ function decodeHTMLEntities(text) {
 }
 
 /**
- * Convert JSX children, preserving whitespace between them
- * Uses sourceText to extract actual whitespace from the original source
+ * Convert JSX children, preserving whitespace between them.
+ * Handles whitespace in two steps:
+ * 1. Gap detection: inserts jsxText(" ") for same-line whitespace gaps between ANY children
+ * 2. Merge pass: merges adjacent jsxText nodes so "Hello" + " " becomes "Hello "
  */
 function convertJSXChildren(childrenCST) {
   if (!childrenCST || childrenCST.length === 0) return [];
 
-  // Get offset info for each child CST node
   const childrenWithOffsets = childrenCST.map(child => {
     const firstOffset = getFirstTokenOffset(child);
     const lastOffset = getLastTokenOffset(child);
     return { cst: child, firstOffset, lastOffset };
   }).filter(c => c.firstOffset !== undefined);
 
-  // Sort by offset
   childrenWithOffsets.sort((a, b) => a.firstOffset - b.firstOffset);
 
   const result = [];
-  
+
   for (let i = 0; i < childrenWithOffsets.length; i++) {
     const current = childrenWithOffsets[i];
-    
-    // Calculate boundaries for text extraction (to preserve leading/trailing whitespace)
-    const prevEnd = i > 0 ? childrenWithOffsets[i - 1].lastOffset + 1 : undefined;
-    const nextStart = childrenWithOffsets[i + 1]?.firstOffset;
-    
-    // Convert the child, passing boundaries for text whitespace preservation
-    const converted = convertJSXChild(current.cst, prevEnd, nextStart);
+
+    // Insert whitespace for same-line gaps between ANY consecutive children
+    if (i > 0 && sourceText) {
+      const prev = childrenWithOffsets[i - 1];
+      const gapStart = prev.lastOffset + 1;
+      const gapEnd = current.firstOffset;
+      if (gapEnd > gapStart) {
+        const gap = sourceText.slice(gapStart, gapEnd);
+        if (gap.length > 0 && gap.trim() === '' && !gap.includes('\n')) {
+          result.push({ type: 'jsxText', value: ' ' });
+        }
+      }
+    }
+
+    const converted = convertJSXChild(current.cst);
     if (converted !== null) {
       result.push(converted);
     }
   }
-  
-  return result;
+
+  // Merge adjacent jsxText nodes: ["Hello", " "] -> ["Hello "]
+  const merged = [];
+  for (const child of result) {
+    const prev = merged[merged.length - 1];
+    if (child.type === 'jsxText' && prev?.type === 'jsxText') {
+      prev.value += child.value;
+    } else {
+      merged.push(child);
+    }
+  }
+  return merged;
 }
 
 /**
@@ -2112,7 +2130,7 @@ function getLastTokenOffset(node) {
   return lastOffset;
 }
 
-function convertJSXChild(cst, startBoundary, endBoundary) {
+function convertJSXChild(cst) {
   if (cst.children.jsxElement) {
     return convertJSXElement(getFirstChild(cst, 'jsxElement'));
   }
@@ -2154,7 +2172,6 @@ function convertJSXChild(cst, startBoundary, endBoundary) {
   }
 
   if (allTokens.length > 0) {
-    // Sort tokens by position to maintain order
     allTokens.sort((a, b) => a.offset - b.offset);
     
     const firstToken = allTokens[0];
@@ -2163,40 +2180,28 @@ function convertJSXChild(cst, startBoundary, endBoundary) {
       ? lastToken.token.endOffset
       : lastToken.token.startOffset + lastToken.token.image.length - 1;
     
-    // Use sourceText with boundaries to preserve leading/trailing whitespace
-    // startBoundary: previous sibling's end (to capture leading whitespace)
-    // endBoundary: next sibling's start (to capture trailing whitespace)
-    if (sourceText && (startBoundary !== undefined || endBoundary !== undefined)) {
-      // Use startBoundary if provided, otherwise use first token's start
-      const textStart = startBoundary ?? firstToken.offset;
-      // Use endBoundary if provided, otherwise use last token's end + 1
-      const textEnd = endBoundary ?? (lastTokenEnd + 1);
-      const textValue = sourceText.slice(textStart, textEnd);
+    // Use sourceText to extract the text's own token range (preserves internal whitespace)
+    // Inter-child whitespace is handled by convertJSXChildren gap detection + merge
+    if (sourceText) {
+      const textValue = sourceText.slice(firstToken.offset, lastTokenEnd + 1);
       if (textValue) {
-        const decodedValue = decodeHTMLEntities(textValue);
-        return {
-          type: 'jsxText',
-          value: decodedValue,
-        };
+        return { type: 'jsxText', value: decodeHTMLEntities(textValue) };
       }
       return null;
     }
 
-    // Fallback: concatenate token images (when sourceText/boundaries not available)
+    // Fallback: concatenate token images (when sourceText not available)
     let textValue = '';
     for (let i = 0; i < allTokens.length; i++) {
       const current = allTokens[i];
 
       if (i > 0) {
         const previous = allTokens[i - 1];
-        // Calculate the end offset of the previous token
         const previousEnd = previous.token.endOffset !== undefined
           ? previous.token.endOffset
           : previous.token.startOffset + previous.token.image.length - 1;
 
-        // Check if there's a gap between tokens (whitespace was skipped)
         if (current.token.startOffset > previousEnd + 1) {
-          // Insert a space to preserve the original spacing
           textValue += ' ';
         }
       }
@@ -2204,7 +2209,6 @@ function convertJSXChild(cst, startBoundary, endBoundary) {
       textValue += current.token.image;
     }
 
-    // Decode HTML entities
     const decodedValue = decodeHTMLEntities(textValue);
     return {
       type: 'jsxText',
