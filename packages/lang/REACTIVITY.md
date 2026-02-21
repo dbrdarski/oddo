@@ -14,10 +14,11 @@ When a value is marked as reactive, transformations lift non-reactive arguments 
 
 1. **`@state` variables** - explicitly create reactive signals
 2. **`@computed` variables** - explicitly create computed signals  
-3. **Function parameters** - including:
+3. **`@component` / `@hook` parameters** (`reactive-param`) - including:
    - Simple parameters (e.g., `(x) => ...`)
    - Destructured parameters (e.g., `({ x, y }) => ...`)
    - Rest parameters (e.g., `(...args) => ...`)
+   - Note: Regular arrow function parameters are NOT reactive — only `@component`/`@hook` params are
 4. **`.oddo` imports** - values imported from `.oddo` files (need cross-file tracking for accuracy, but treat as reactive for now)
 
 ### Non-Reactive Values

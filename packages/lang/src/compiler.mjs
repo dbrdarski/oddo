@@ -167,11 +167,12 @@ function createReactiveExpr(oddoExpr, valueExpr, attrExpression = false) {
   const pragma = attrExpression ? 'computed' : 'x'
 
   if (identifiers.length === 0) {
-    // No dependencies - just return the expression directly if it's a literal
-    if (t.isLiteral(valueExpr)) {
+    // No reactive deps - attributes and literals can be returned directly.
+    // JSX children still need _x() wrapper for DOM render pipeline lifecycle.
+    if (attrExpression || t.isLiteral(valueExpr)) {
       return valueExpr;
     }
-    // Otherwise wrap with empty deps
+    // JSX children: wrap with _x for render pipeline lifecycle
     usedModifiers.add(pragma);
     const arrowFunc = t.arrowFunctionExpression([], valueExpr);
     return t.callExpression(
@@ -1703,9 +1704,9 @@ function convertArrowFunction(expr) {
   // Restore parent scope
   currentScope = savedScope;
 
-  // If there are reactive deps, OR (params AND we're in a reactive scope), wrap with _liftFn
-  // In non-reactive scopes, we don't need _liftFn just for having params
-  if (reactiveDepsForBody.length > 0 || (params.length > 0 && inReactiveScope)) {
+  // Wrap with _liftFn ONLY when the function body captures reactive variables from the parent scope.
+  // Call sites handle unwrapping, so functions don't need _liftFn just for having params.
+  if (reactiveDepsForBody.length > 0) {
     usedModifiers.add('liftFn');
     
     // Prepend reactive dep params to original params

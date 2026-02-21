@@ -274,7 +274,7 @@ import componentsExample from "./playground/components"
         <button class="run-btn" onclick={runPreview}>Run</button>
       </div>
       <div class="preview-content">
-        <iframe id="preview-frame" sandbox="allow-scripts"></iframe>
+        <iframe id="preview-frame" sandbox="allow-scripts  allow-modals"></iframe>
       </div>
     </div>
   </div>

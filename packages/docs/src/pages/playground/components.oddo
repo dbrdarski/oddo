@@ -37,13 +37,22 @@ contentStyle = "position: relative; flex-direction: column; display: flex; backg
 
 @component App = () => {
   @state [showModal, setShowModal] = false
+  @state [count, setCount] = 1
+
   return (<div>
      <button onclick={() => {
-setShowModal(true)}
+  setShowModal(true)
+  setCount(33)
+}
 }>Show modal</button>
+     <button onclick={() => {
+setCount(10)}
+}>++</button>
+    { count }
      <Modal open={showModal}>{1}</Modal>
     { showModal && <div>asdf</div> }
   </div>)
 }
 
-mount(document.body, <App />)`
+mount(document.body, <App />)
+`
