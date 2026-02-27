@@ -2,8 +2,10 @@ import { patchAttributes } from "./attrs.mjs"
 import { observable, reactiveSymbol, effect2, computed, createAccessor } from "./reactive.mjs"
 
 const emptyObject = {}
+const svgNS = "http://www.w3.org/2000/svg"
 
 let currentContext = null
+let svgContext = false
 const cleanupContext = (parent) => {
   const { subscribe, notify: disposeChildren} = observable()
   const { subscribe: onCleanup, notify: runCleanup} = observable()
@@ -41,32 +43,39 @@ export const createFragment = (...children) => (parent, oldNodeCleanup) => {
   }
   const endNode = hydrating ? walk() : document.createComment("]")
   hydrating || node.appendChild(endNode)
-  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
+  oldNodeCleanup ? oldNodeCleanup(node) : hydrating || parent.appendChild(node)
 
-  return (parent, newElement) => {
+  return (newElement) => {
     const range = document.createRange()
     range.setStart(startNode, 1)
-    range.setEnd(endNode, 0)
+    range.setEnd(endNode, 0) // this seems to leave out the last node
     range.deleteContents()
-    parent.replaceChild(newElement, startNode)
+    startNode.replaceWith(newElement)
   }
 }
 
 export const createElement = (tag, attrs, ...children) => (parent, oldNodeCleanup) => {
-  const node = hydrating ? walk() : document.createElement(tag)
+  const isSvg = tag === "svg"
+  const inSvg = isSvg || svgContext
+  const node = hydrating ? walk()
+    : inSvg ? document.createElementNS(svgNS, tag)
+    : document.createElement(tag)
   const patch = patchAttributes(node)
   attrs?.[reactiveSymbol]
     ? effect2((attrs) => patch(attrs(), hydrating), [attrs])
     : patch(attrs, hydrating)
 
+  const prevSvgContext = svgContext
+  if (isSvg) svgContext = true
   const temp = walk
   hydrating && (walk = domWalker(node.childNodes))
   for (const child of children) { render(child)(node) }
   hydrating && (walk = temp)
-  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
+  svgContext = prevSvgContext
+  oldNodeCleanup ? oldNodeCleanup(node) : hydrating || parent.appendChild(node)
 
-  return (parent, newElement) => {
-    parent.replaceChild(newElement, node)
+  return (newElement) => {
+    newElement.replaceWith(node)
   }
 }
 
@@ -109,19 +118,19 @@ export const render = vdom => {
 
 export const createNullElement = () => (parent, oldNodeCleanup) => {
   const node = hydrating ? walk() : document.createComment("|")
-  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
+  oldNodeCleanup ? oldNodeCleanup(node) : hydrating || parent.appendChild(node)
 
-  return (parent, newElement) => {
-    parent.replaceChild(newElement, node)
+  return (newElement) => {
+    node.replaceWith(newElement)
   }
 }
 
 export const createTextElement = (text) => (parent, oldNodeCleanup) => {
   const node = hydrating ? (walk(), walk()) : document.createTextNode(text)
-  oldNodeCleanup ? oldNodeCleanup(parent, node) : hydrating || parent.appendChild(node)
+  oldNodeCleanup ? oldNodeCleanup(node) : hydrating || parent.appendChild(node)
 
-  return (parent, newElement) => {
-    parent.replaceChild(newElement, node)
+  return (newElement) => {
+    node.replaceWith(newElement)
   }
 }
 

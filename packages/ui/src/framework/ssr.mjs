@@ -13,11 +13,13 @@ export const createJsxExpression = (fn, deps) => () =>
 export const createFragment = (...children) => () =>
   `<!--[-->${children.map(render).join("")}<!--]-->`
 
-export const createElement = (tag, attrs, ...children) => () =>
-  `<${tag}${attrs?.[reactiveSymbol]
+export const createElement = (tag, attrs, ...children) => () => {
+  const svgAttr = tag === "svg" ? ' xmlns="http://www.w3.org/2000/svg"' : ""
+  const renderedAttrs = attrs?.[reactiveSymbol]
     ? lift((attrs) => createAttributes(attrs()), [attrs])
     : createAttributes(attrs)
-  }${voidElements.has(tag) ? " />" : `>${children.map(render).join("")}</${tag}>`}`
+  return `<${tag}${svgAttr}${renderedAttrs}${voidElements.has(tag) ? " />" : `>${children.map(render).join("")}</${tag}>`}`
+}
 
 export const createComponent = (component, attrs, ...children) => () => {
   // const initializers = []

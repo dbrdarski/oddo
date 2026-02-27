@@ -39,8 +39,8 @@ export const computed = (fn, deps) => {
   deps = bindDependencies(deps, () => (cached = false, notify()))
 
   return new ReactiveContainer(function computed (caller) {
+    caller && subscribe(caller)
     if (!cached) {
-      caller && subscribe(caller)
       cache = fn(...deps)
       cached = true
     }
@@ -97,7 +97,7 @@ export const stateProxy = (target, mutable, notifyParent) => {
         return target = mutate(mutable)
       },
       deleteProperty (_, key) {
-  			if (record.hasOwnProperty(key)) {
+  			if (target.hasOwnProperty(key)) {
    				target = mutate()
   				delete target[key]
           delete children[key]
@@ -106,7 +106,7 @@ export const stateProxy = (target, mutable, notifyParent) => {
   			}
   		},
       set (_, key, value) {
-        if (record.hasOwnProperty(prop) && target[key] === value) return false
+        if (target.hasOwnProperty(key) && target[key] === value) return false
         if (children.has(key) && !(value && typeof value === "object")) {
           children.delete(key)
         }

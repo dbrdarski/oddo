@@ -1,0 +1,71 @@
+---
+description: Oddo compiler reactivity rules - how reactive values are tracked, wrapped, and propagated
+globs: packages/lang/src/compiler.mjs
+---
+
+# Oddo Reactivity Compilation Rules
+
+## Variable Reactivity Classification
+
+| Type | Reactive? | Examples |
+|---|---|---|
+| `@state` | Yes | `@state x = 3` |
+| `@computed` | Yes | `@computed sum = a + b` |
+| `reactive-param` | Yes | `@component` / `@hook` params |
+| `import-oddo` | Yes | `import Btn from "./Btn.oddo"` |
+| `param` | **No** | Regular arrow fn params |
+| `immutable` | No | `x = 5` (plain declaration) |
+| `mutable` | No | `@mutable x = 5` |
+| `import-js` | No | `import $ from "jquery"` |
+| Undeclared/global | No | `console`, `Math`, `document` |
+
+Only `@state`, `@computed`, `reactive-param`, and `import-oddo` are reactive. Regular arrow function params (`param` type) are NOT reactive — only `@component`/`@hook` params (`reactive-param`) are.
+
+## Core Principle
+
+**Reactivity is handled at the point of use (call site), not the point of definition.** The compiler wraps expressions where reactive values are consumed. Functions don't need `_liftFn` wrapping just because they might theoretically be called with reactive args — the call site already unwraps via `_lift` / `_x` / `_computed`.
+
+## Wrapping Rules
+
+### `_liftFn` (arrow functions)
+
+- Wrap ONLY when the function body captures reactive variables from the parent scope
+- These deps become prepended params: `_liftFn((dep, originalParam) => body, [dep])`
+- NEVER wrap with empty deps `[]` — if there are no reactive deps from the parent scope, it's just a plain arrow function
+- Inside the wrapped body: deps are treated as non-reactive (already unwrapped)
+
+### `_x` / `createJsxExpression` (JSX child expressions `{expr}`)
+
+- ALWAYS wrap non-literal dynamic expressions, even with zero reactive deps: `_x(() => expr, [])`
+- Needed for DOM render pipeline lifecycle (effects, cleanup, patching)
+- With reactive deps: `_x((_dep) => ... _dep() ..., [dep])`
+- Literals returned directly: `{"hello"}` -> `"hello"`
+
+### `_computed` (JSX attribute expressions `attr={expr}`)
+
+- Wrap ONLY when the expression has reactive deps: `_computed((_dep) => ... _dep() ..., [dep])`
+- With zero reactive deps: return the expression directly (no wrapping)
+- Literals already returned directly
+- `patchAttributes` handles both plain values and ReactiveContainers, so wrapping is pure overhead when no deps exist
+
+### `_lift` (plain reactive expressions)
+
+- Wrap when a non-function expression references reactive variables
+- With zero reactive deps: expression is used as-is
+
+### `_computed` modifier (`@computed x = expr`)
+
+- Always wraps with deps from expression
+- Scope inside is non-reactive
+
+### `_effect` modifier (`@effect () => { ... }`)
+
+- Always wraps with deps from body
+- Scope inside is non-reactive
+
+## Scope Rules
+
+- **Module scope**: `reactiveScope = true` — but this only affects which parent-scope variables are collected as deps for `_liftFn`, NOT whether to wrap functions that have no deps
+- **Inside `_liftFn` with deps**: `reactiveScope = false`
+- **Inside `@computed` / `@effect` / JSX expression scopes**: `reactiveScope = false`
+- **Inside `@component` / `@hook`**: Inherits from parent; params are `reactive-param`
