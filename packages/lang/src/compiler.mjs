@@ -349,6 +349,13 @@ const MODIFIER_TRANSFORMATIONS = {
             // Member access assignment (x.y := 1, x[0] := 1, etc.)
             if (!leftName && stmt.expression.left?.type === 'memberAccess') {
               hasMutation = true;
+              const rootName = extractMemberRoot(stmt.expression.left);
+              if (rootName && stateSetterMap.has(rootName)) {
+                stateAssignmentsMap.set(rootName, {
+                  kind: 'state',
+                  setter: stateSetterMap.get(rootName)
+                });
+              }
               // For compound member assignments, expand: x.y +:= 1 -> x.y := x.y + 1
               let rightOddo = stmt.expression.right;
               const op = stmt.expression.operator;
@@ -496,9 +503,9 @@ const MODIFIER_TRANSFORMATIONS = {
       
       const outerReactiveDeps = new Set();
       for (const processed of processedStatements) {
-        // Collect identifiers from right-hand side expressions
         const nodesToScan = [];
         if (processed.rightOddo) nodesToScan.push(processed.rightOddo);
+        if (processed.leftOddo) nodesToScan.push(processed.leftOddo);
         if (processed.sliceOddo?.start) nodesToScan.push(processed.sliceOddo.start);
         if (processed.sliceOddo?.end) nodesToScan.push(processed.sliceOddo.end);
         if (processed.stmtOddo) nodesToScan.push(processed.stmtOddo);
@@ -632,11 +639,13 @@ const MODIFIER_TRANSFORMATIONS = {
         } else if (processed.kind === 'member') {
           // Member access assignment: x.y := expr, x[0] := expr
           const leftBabel = convertExpression(processed.leftOddo);
+          const rootNode = findBabelMemberRoot(leftBabel);
+          const wrappedLeftBabel = wrapCallableIds(leftBabel, rootNode);
           const rightBabel = convertExpression(processed.rightOddo);
           const wrappedRightExpr = wrapCallableIds(rightBabel);
           mutateBodyStmts.push(
             t.expressionStatement(
-              t.assignmentExpression('=', leftBabel, wrappedRightExpr)
+              t.assignmentExpression('=', wrappedLeftBabel, wrappedRightExpr)
             )
           );
         } else if (processed.kind === 'regular') {
@@ -941,6 +950,19 @@ function extractBoundNames(pattern, names = []) {
   }
 
   return names;
+}
+
+function extractMemberRoot(node) {
+  if (node.type === 'identifier') return node.name;
+  if (node.type === 'memberAccess') return extractMemberRoot(node.object);
+  return null;
+}
+
+function findBabelMemberRoot(node) {
+  if (t.isMemberExpression(node) || t.isOptionalMemberExpression(node)) {
+    return findBabelMemberRoot(node.object);
+  }
+  return node;
 }
 
 // UID generator that avoids collisions (available during conversion)

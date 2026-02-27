@@ -93,9 +93,11 @@ import {
   WhiteSpace,
 } from './lexer.mjs';
 
-// Maximum number of tokens to look ahead when parsing arrow function parameters
-// This prevents infinite loops and excessive lookahead for malformed input
-const MAX_TOKEN_LOOKAHEAD_COUNT = 30;
+// Lookahead scan limit for GATE functions that resolve ambiguities
+// (arrow params vs parenthesized expr, destructuring vs array/object literal).
+// All scan loops terminate naturally via `if (!token) break`, so this is
+// just a safety net against pathological input. Infinity is fine in practice.
+const MAX_TOKEN_LOOKAHEAD_COUNT = Infinity;
 
 class OddoParser extends CstParser {
   constructor() {
