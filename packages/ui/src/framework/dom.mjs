@@ -75,7 +75,7 @@ export const createElement = (tag, attrs, ...children) => (parent, oldNodeCleanu
   oldNodeCleanup ? oldNodeCleanup(node) : hydrating || parent.appendChild(node)
 
   return (newElement) => {
-    newElement.replaceWith(node)
+    node.replaceWith(newElement)
   }
 }
 
