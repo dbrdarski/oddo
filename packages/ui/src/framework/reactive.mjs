@@ -192,3 +192,33 @@ export const transact = (mutator, finalizer, targets, otherValues = empty) => {
 export const lift = (fn, deps) => fn(...bindDependencies(deps))
 export const liftFn = (callbackFn, deps = empty) => (...args) =>
   callbackFn(...deps.map(liftValue), ...args.map(liftValue))
+
+const resolveAndSubscribe = (obj, cleanup) => {
+  if (Array.isArray(obj)) {
+    return obj.map(v =>
+      v?.[reactiveSymbol] ? v[reactiveSymbol].getter(cleanup)
+      : (v && typeof v === 'object') ? resolveAndSubscribe(v, cleanup)
+      : v
+    )
+  }
+  const result = {}
+  for (const key of Object.keys(obj)) {
+    const value = obj[key]
+    if (value?.[reactiveSymbol]) {
+      result[key] = value[reactiveSymbol].getter(cleanup)
+    } else if (value && typeof value === 'object') {
+      result[key] = resolveAndSubscribe(value, cleanup)
+    } else {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+export const compositeProxy = (target) => {
+  const container = {}
+  container[reactiveSymbol] = {
+    getter: (cleanup) => resolveAndSubscribe(target, cleanup)
+  }
+  return container
+}

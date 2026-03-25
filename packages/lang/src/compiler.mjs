@@ -116,38 +116,199 @@ function getReactiveDeps(identifiers) {
   });
 }
 
+// Collect composite member-expression deps from an Oddo AST node.
+// Returns an array of { base, path, paramName, fullPath } for each reactive leaf
+// accessed on a composite variable.
+function collectCompositeDeps(node, deps = [], seen = new Set(), stopAtJsxExpressions = false, stopAtArrowFunctions = false) {
+  if (!node || typeof node !== 'object') return deps;
+  if (stopAtJsxExpressions && node.type === 'jsxExpression') return deps;
+  if (stopAtArrowFunctions && node.type === 'arrowFunction') return deps;
+
+  if (node.type === 'memberAccess') {
+    const path = [];
+    let current = node;
+    while (current?.type === 'memberAccess') {
+      if (typeof current.property === 'string') path.unshift(current.property);
+      else break;
+      current = current.object;
+    }
+
+    if (current?.type === 'identifier' && path.length > 0 && isComposite(current.name)) {
+      const shape = getCompositeShape(current.name);
+      const resolved = resolveCompositePath(shape, path);
+
+      if (resolved?.reactive === true) {
+        const fullPath = current.name + '.' + path.join('.');
+        if (!seen.has(fullPath)) {
+          seen.add(fullPath);
+          deps.push({
+            base: current.name,
+            path: path.slice(),
+            paramName: '_' + current.name + '_' + path.join('_'),
+            fullPath
+          });
+        }
+        return deps;
+      }
+      // If resolved to composite, continue recursion (sub-members might be deps)
+    }
+  }
+
+  if (node.type === 'property') {
+    if (node.computed && node.key) {
+      collectCompositeDeps(node.key, deps, seen, stopAtJsxExpressions, stopAtArrowFunctions);
+    }
+    if (node.value) {
+      collectCompositeDeps(node.value, deps, seen, stopAtJsxExpressions, stopAtArrowFunctions);
+    }
+    return deps;
+  }
+
+  for (const key of Object.keys(node)) {
+    if (key === 'type') continue;
+    const val = node[key];
+    if (Array.isArray(val)) {
+      val.forEach(item => collectCompositeDeps(item, deps, seen, stopAtJsxExpressions, stopAtArrowFunctions));
+    } else if (val && typeof val === 'object') {
+      collectCompositeDeps(val, deps, seen, stopAtJsxExpressions, stopAtArrowFunctions);
+    }
+  }
+  return deps;
+}
+
+// Collect composite spread operations from an Oddo AST node.
+// Returns an array of { base, paramName } for each composite variable that is spread.
+function collectCompositeSpreads(node, spreads = [], seen = new Set(), stopAtJsxExpressions = false, stopAtArrowFunctions = false) {
+  if (!node || typeof node !== 'object') return spreads;
+  if (stopAtJsxExpressions && node.type === 'jsxExpression') return spreads;
+  if (stopAtArrowFunctions && node.type === 'arrowFunction') return spreads;
+
+  if (node.type === 'spreadProperty' || node.type === 'spreadElement' || node.type === 'spread') {
+    const arg = node.argument || node.expression;
+    if (arg?.type === 'identifier' && isComposite(arg.name)) {
+      if (!seen.has(arg.name)) {
+        seen.add(arg.name);
+        spreads.push({
+          base: arg.name,
+          paramName: '_' + arg.name + '_spread'
+        });
+      }
+      return spreads;
+    }
+  }
+
+  for (const key of Object.keys(node)) {
+    if (key === 'type') continue;
+    const val = node[key];
+    if (Array.isArray(val)) {
+      val.forEach(item => collectCompositeSpreads(item, spreads, seen, stopAtJsxExpressions, stopAtArrowFunctions));
+    } else if (val && typeof val === 'object') {
+      collectCompositeSpreads(val, spreads, seen, stopAtJsxExpressions, stopAtArrowFunctions);
+    }
+  }
+  return spreads;
+}
+
+// Build a Babel MemberExpression from base identifier and path array
+// e.g., ('data', ['user', 'name']) => data.user.name
+function buildMemberExpression(base, path) {
+  let node = t.identifier(base);
+  for (const prop of path) {
+    node = t.memberExpression(node, t.identifier(prop));
+  }
+  return node;
+}
+
+// Replace member expression patterns in a Babel AST with call expressions.
+// compositeDeps: array of { base, path, paramName }
+// Finds patterns like data.user.name and replaces with _data_user_name()
+function wrapCompositeDepsWithCalls(babelNode, compositeDeps, prefix = '') {
+  if (compositeDeps.length === 0) return;
+
+  const tempFile = t.file(t.program([
+    t.isStatement(babelNode) ? babelNode : t.expressionStatement(babelNode)
+  ]));
+
+  // Build a lookup: "base.path.parts" => paramName
+  const pathMap = new Map();
+  for (const dep of compositeDeps) {
+    pathMap.set(dep.fullPath, prefix + dep.paramName);
+  }
+
+  // Find and replace MemberExpressions that match composite dep paths
+  traverse(tempFile, {
+    noScope: true,
+    CallExpression(path) {
+      const callee = path.node.callee;
+      if (t.isIdentifier(callee) && callee.name.startsWith('_') &&
+          path.node.arguments.length === 2 &&
+          t.isArrowFunctionExpression(path.node.arguments[0]) &&
+          t.isArrayExpression(path.node.arguments[1])) {
+        path.skip();
+      }
+    },
+    MemberExpression(path) {
+      // Build the full path string from this member expression
+      const parts = [];
+      let current = path.node;
+      while (t.isMemberExpression(current) && !current.computed) {
+        parts.unshift(current.property.name);
+        current = current.object;
+      }
+      if (t.isIdentifier(current)) {
+        parts.unshift(current.name);
+        const fullPath = parts.join('.');
+        if (pathMap.has(fullPath)) {
+          path.replaceWith(t.callExpression(t.identifier(pathMap.get(fullPath)), []));
+          path.skip();
+        }
+      }
+    }
+  });
+}
+
 // Create a lifted expression: _lift((deps...) => expr, [deps...])
 // For functions: _liftFn((deps..., originalParams...) => body, [deps...])
 // NO transformation of expression body - runtime handles unwrapping
-function createLiftedExpr(valueExpr, identifiers) {
+function createLiftedExpr(valueExpr, identifiers, oddoExpr = null) {
   const reactiveDeps = getReactiveDeps(identifiers);
+  const compositeDeps = oddoExpr ? collectCompositeDeps(oddoExpr) : [];
+  const compositeSpreads = oddoExpr ? collectCompositeSpreads(oddoExpr) : [];
   
-  if (reactiveDeps.length === 0) {
-    // No reactive deps - return expression as-is
+  if (reactiveDeps.length === 0 && compositeDeps.length === 0 && compositeSpreads.length === 0) {
     return null;
   }
   
-  const depParams = reactiveDeps.map(id => t.identifier(id));
-  const depsArray = reactiveDeps.map(id => t.identifier(id));
+  const depParams = [
+    ...reactiveDeps.map(id => t.identifier(id)),
+    ...compositeDeps.map(dep => t.identifier(dep.paramName)),
+    ...compositeSpreads.map(sp => t.identifier(sp.paramName))
+  ];
+  const depsArray = [
+    ...reactiveDeps.map(id => t.identifier(id)),
+    ...compositeDeps.map(dep => buildMemberExpression(dep.base, dep.path)),
+    ...compositeSpreads.map(sp => {
+      usedModifiers.add('compositeProxy');
+      return t.callExpression(
+        t.identifier(modifierAliases['compositeProxy']),
+        [t.identifier(sp.base)]
+      );
+    })
+  ];
   
-  // Check if valueExpr is a function expression
   if (t.isArrowFunctionExpression(valueExpr)) {
-    // For functions: use _liftFn, prepend reactive deps to existing params
     usedModifiers.add('liftFn');
-    
-    // Prepend reactive dep params to original function params
     const newParams = [...depParams, ...valueExpr.params];
     const liftedFunc = t.arrowFunctionExpression(newParams, valueExpr.body);
-    
     return t.callExpression(
       t.identifier(modifierAliases['liftFn']),
       [liftedFunc, t.arrayExpression(depsArray)]
     );
   }
   
-  // For non-functions: use _lift
   usedModifiers.add('lift');
   const arrowFunc = t.arrowFunctionExpression(depParams, valueExpr);
+  wrapCompositeDepsWithCalls(arrowFunc, compositeDeps);
   
   return t.callExpression(
     t.identifier(modifierAliases['lift']),
@@ -160,19 +321,16 @@ function createLiftedExpr(valueExpr, identifiers) {
 // valueExpr: Babel AST for the expression
 // attrExpression: whether this is for a JSX attribute (uses 'computed' pragma)
 function createReactiveExpr(oddoExpr, valueExpr, attrExpression = false) {
-  // Extract identifiers from Oddo AST and filter to reactive ones
-  // Stop at nested jsxExpression nodes - each is its own reactivity boundary
   const allIdentifiers = collectOddoIdentifiersOnly(oddoExpr, new Set(), true);
   const identifiers = allIdentifiers.filter(id => isReactive(id));
+  const compositeDeps = collectCompositeDeps(oddoExpr, [], new Set(), true);
+  const compositeSpreads = collectCompositeSpreads(oddoExpr, [], new Set(), true);
   const pragma = attrExpression ? 'computed' : 'x'
 
-  if (identifiers.length === 0) {
-    // No reactive deps - attributes and literals can be returned directly.
-    // JSX children still need _x() wrapper for DOM render pipeline lifecycle.
+  if (identifiers.length === 0 && compositeDeps.length === 0 && compositeSpreads.length === 0) {
     if (attrExpression || t.isLiteral(valueExpr)) {
       return valueExpr;
     }
-    // JSX children: wrap with _x for render pipeline lifecycle
     usedModifiers.add(pragma);
     const arrowFunc = t.arrowFunctionExpression([], valueExpr);
     return t.callExpression(
@@ -182,13 +340,25 @@ function createReactiveExpr(oddoExpr, valueExpr, attrExpression = false) {
   }
 
   usedModifiers.add(pragma);
-  // Use prefixed param names to avoid shadowing in nested scopes
-  const params = identifiers.map(id => t.identifier('_' + id));
-  // Deps array uses original names (references the actual reactive signals)
-  const deps = identifiers.map(id => t.identifier(id));
+  const params = [
+    ...identifiers.map(id => t.identifier('_' + id)),
+    ...compositeDeps.map(dep => t.identifier(dep.paramName)),
+    ...compositeSpreads.map(sp => t.identifier(sp.paramName))
+  ];
+  const deps = [
+    ...identifiers.map(id => t.identifier(id)),
+    ...compositeDeps.map(dep => buildMemberExpression(dep.base, dep.path)),
+    ...compositeSpreads.map(sp => {
+      usedModifiers.add('compositeProxy');
+      return t.callExpression(
+        t.identifier(modifierAliases['compositeProxy']),
+        [t.identifier(sp.base)]
+      );
+    })
+  ];
   const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
-  // Replace identifiers with prefixed + called versions: foo -> _foo()
   wrapDependenciesWithCalls(arrowFunc, identifiers, '_');
+  wrapCompositeDepsWithCalls(arrowFunc, compositeDeps);
 
   return t.callExpression(
     t.identifier(modifierAliases[pragma]),
@@ -201,25 +371,36 @@ function createReactiveExpr(oddoExpr, valueExpr, attrExpression = false) {
 const MODIFIER_TRANSFORMATIONS = {
   state: {
     needsImport: true,
-    // @state x = 3 -> const [x, setX] = _state(3);
-    // @state x = reactiveVar -> const [x, setX] = _state(_lift(_reactiveVar => _reactiveVar(), [reactiveVar]));
-    // Receives Oddo AST, extracts deps, lifts if needed
     transform: (oddoExpr, leftExpr) => {
-      // Collect identifiers and filter to reactive deps
       const allIdentifiers = collectOddoIdentifiersOnly(oddoExpr);
       const reactiveDeps = allIdentifiers.filter(id => isReactive(id));
+      const compositeDeps = collectCompositeDeps(oddoExpr);
+      const compositeSpreads = collectCompositeSpreads(oddoExpr);
       
-      // Convert Oddo AST to Babel AST
       const convertedExpr = convertExpression(oddoExpr);
       
       let stateArg;
-      if (reactiveDeps.length > 0) {
-        // Wrap with _lift for reactive deps
+      if (reactiveDeps.length > 0 || compositeDeps.length > 0 || compositeSpreads.length > 0) {
         usedModifiers.add('lift');
-        const prefixedParams = reactiveDeps.map(id => t.identifier('_' + id));
-        const deps = reactiveDeps.map(id => t.identifier(id));
+        const prefixedParams = [
+          ...reactiveDeps.map(id => t.identifier('_' + id)),
+          ...compositeDeps.map(dep => t.identifier(dep.paramName)),
+          ...compositeSpreads.map(sp => t.identifier(sp.paramName))
+        ];
+        const deps = [
+          ...reactiveDeps.map(id => t.identifier(id)),
+          ...compositeDeps.map(dep => buildMemberExpression(dep.base, dep.path)),
+          ...compositeSpreads.map(sp => {
+            usedModifiers.add('compositeProxy');
+            return t.callExpression(
+              t.identifier(modifierAliases['compositeProxy']),
+              [t.identifier(sp.base)]
+            );
+          })
+        ];
         const arrowFunc = t.arrowFunctionExpression(prefixedParams, convertedExpr);
         wrapDependenciesWithCalls(arrowFunc, reactiveDeps, '_');
+        wrapCompositeDepsWithCalls(arrowFunc, compositeDeps);
         stateArg = t.callExpression(
           t.identifier(modifierAliases['lift']),
           [arrowFunc, t.arrayExpression(deps)]
@@ -274,31 +455,50 @@ const MODIFIER_TRANSFORMATIONS = {
   },
   computed: {
     needsImport: true,
-    // @computed sum = x + y -> const sum = _computed((x, y) => x() + y(), [x, y])
-    // Receives Oddo AST, extracts deps from Oddo, converts internally
     transform: (oddoExpr, leftExpr) => {
-      // Extract reactive deps from Oddo AST
       const allIds = collectOddoIdentifiersOnly(oddoExpr);
       const identifiers = allIds.filter(id => isReactive(id));
+      const compositeDeps = collectCompositeDeps(oddoExpr);
+      const compositeSpreads = collectCompositeSpreads(oddoExpr);
       
-      // Mark scope as non-reactive for nested functions (deps are unwrapped inside @computed)
       const savedScope = currentScope;
       currentScope = Object.create(currentScope);
       currentScope[reactiveScope] = false;
+      for (const dep of compositeDeps) {
+        if (!Object.prototype.hasOwnProperty.call(currentScope, dep.base)) {
+          currentScope[dep.base] = { type: 'param', reactive: false, composite: null };
+        }
+      }
+      for (const sp of compositeSpreads) {
+        if (!Object.prototype.hasOwnProperty.call(currentScope, sp.base)) {
+          currentScope[sp.base] = { type: 'param', reactive: false, composite: null };
+        }
+      }
       
-      // Convert Oddo AST to Babel AST
       const valueExpr = convertExpression(oddoExpr);
       
-      // Restore scope
       currentScope = savedScope;
       
-      const params = identifiers.map(id => t.identifier(id));
-      const deps = identifiers.map(id => t.identifier(id));
+      const params = [
+        ...identifiers.map(id => t.identifier(id)),
+        ...compositeDeps.map(dep => t.identifier(dep.paramName)),
+        ...compositeSpreads.map(sp => t.identifier(sp.paramName))
+      ];
+      const deps = [
+        ...identifiers.map(id => t.identifier(id)),
+        ...compositeDeps.map(dep => buildMemberExpression(dep.base, dep.path)),
+        ...compositeSpreads.map(sp => {
+          usedModifiers.add('compositeProxy');
+          return t.callExpression(
+            t.identifier(modifierAliases['compositeProxy']),
+            [t.identifier(sp.base)]
+          );
+        })
+      ];
 
       const arrowFunc = t.arrowFunctionExpression(params, valueExpr);
-
-      // Wrap dependency references with call expressions
       wrapDependenciesWithCalls(arrowFunc, identifiers);
+      wrapCompositeDepsWithCalls(arrowFunc, compositeDeps);
 
       const computedCall = t.callExpression(
         t.identifier(modifierAliases['computed']),
@@ -306,7 +506,6 @@ const MODIFIER_TRANSFORMATIONS = {
       );
 
       if (leftExpr && t.isIdentifier(leftExpr)) {
-        // Variable is already tracked in scope during pre-pass
         return t.variableDeclaration('const', [
           t.variableDeclarator(leftExpr, computedCall)
         ]);
@@ -502,6 +701,10 @@ const MODIFIER_TRANSFORMATIONS = {
       currentScope = mutateScope;
       
       const outerReactiveDeps = new Set();
+      const outerCompositeDeps = [];
+      const outerCompositeSpreads = [];
+      const compositeDepsSeen = new Set();
+      const compositeSpreadsSeen = new Set();
       for (const processed of processedStatements) {
         const nodesToScan = [];
         if (processed.rightOddo) nodesToScan.push(processed.rightOddo);
@@ -513,24 +716,23 @@ const MODIFIER_TRANSFORMATIONS = {
         for (const node of nodesToScan) {
           const ids = collectOddoIdentifiersOnly(node);
           for (const id of ids) {
-            // isReactive() checks: is it declared as reactive (@state, @computed)?
-            // Local vars (immutable) and params are NOT reactive
-            // Outer @state/@computed ARE reactive
             if (isReactive(id) && !uniqueStateNames.includes(id)) {
               outerReactiveDeps.add(id);
             }
           }
+          collectCompositeDeps(node, outerCompositeDeps, compositeDepsSeen);
+          collectCompositeSpreads(node, outerCompositeSpreads, compositeSpreadsSeen);
         }
       }
       
       const outerDepsArray = Array.from(outerReactiveDeps);
       
-      // Build the mutate function body
-      // Parameters: (finalizer, ...stateContainers, ...outerDeps, ...originalParams)
       const mutateParams = [
         t.identifier('finalizer'),
         ...uniqueStateNames.map(n => t.identifier(n)),
         ...outerDepsArray.map(n => t.identifier(n)),
+        ...outerCompositeDeps.map(dep => t.identifier(dep.paramName)),
+        ...outerCompositeSpreads.map(sp => t.identifier(sp.paramName)),
         ...funcParams.map(n => t.identifier(n))
       ];
 
@@ -543,19 +745,26 @@ const MODIFIER_TRANSFORMATIONS = {
         usedModifiers.add('stateProxy');
       }
 
-      // Set of all identifiers that need to be called with ()
-      // This includes: state containers + outer reactive deps
       const callableIds = new Set([
         ...uniqueStateNames,
         ...outerDepsArray
       ]);
 
-      // Mark scope as non-reactive for nested functions (deps are unwrapped inside @mutate)
-      // Also mark all callable ids as non-reactive so convertStatement doesn't apply lift
       currentScope = Object.create(mutateScope);
       currentScope[reactiveScope] = false;
       for (const id of callableIds) {
         currentScope[id] = { type: 'param', reactive: false };
+      }
+      for (const dep of outerCompositeDeps) {
+        currentScope[dep.paramName] = { type: 'param', reactive: false };
+        if (!Object.prototype.hasOwnProperty.call(currentScope, dep.base)) {
+          currentScope[dep.base] = { type: 'param', reactive: false, composite: null };
+        }
+      }
+      for (const sp of outerCompositeSpreads) {
+        if (!Object.prototype.hasOwnProperty.call(currentScope, sp.base)) {
+          currentScope[sp.base] = { type: 'param', reactive: false, composite: null };
+        }
       }
 
       // Helper function to wrap reactive identifiers with () calls
@@ -685,10 +894,9 @@ const MODIFIER_TRANSFORMATIONS = {
         );
       }
 
-      const mutateArrowFunc = t.arrowFunctionExpression(
-        mutateParams,
-        t.blockStatement(mutateBodyStmts)
-      );
+      const mutateBody = t.blockStatement(mutateBodyStmts);
+      const mutateArrowFunc = t.arrowFunctionExpression(mutateParams, mutateBody);
+      wrapCompositeDepsWithCalls(mutateArrowFunc, outerCompositeDeps);
 
       // Build finalizer function for state assignments
       const finalizerParams = stateNamesForFinalizer.map(n => t.identifier(n));
@@ -708,10 +916,17 @@ const MODIFIER_TRANSFORMATIONS = {
         uniqueStateNames.map(n => t.identifier(n))
       );
 
-      // Build outer deps array
-      const outerDepsArrayExpr = t.arrayExpression(
-        outerDepsArray.map(n => t.identifier(n))
-      );
+      const outerDepsArrayExpr = t.arrayExpression([
+        ...outerDepsArray.map(n => t.identifier(n)),
+        ...outerCompositeDeps.map(dep => buildMemberExpression(dep.base, dep.path)),
+        ...outerCompositeSpreads.map(sp => {
+          usedModifiers.add('compositeProxy');
+          return t.callExpression(
+            t.identifier(modifierAliases['compositeProxy']),
+            [t.identifier(sp.base)]
+          );
+        })
+      ]);
 
       // Build the mutate call
       const mutateCall = t.callExpression(
@@ -729,55 +944,74 @@ const MODIFIER_TRANSFORMATIONS = {
   },
   effect: {
     needsImport: true,
-    // @effect (() => setWhatever(x)) -> _effect((setWhatever, x) => { setWhatever()(x()) }, [setWhatever, x])
-    // Note: receives Oddo AST (not Babel AST) to avoid premature wrapping with _liftFn
     transform: (oddoExpr) => {
-      // effect must be an arrow function (Oddo AST)
       if (oddoExpr.type !== 'arrowFunction') {
         throw new Error('effect modifier must be a function');
       }
 
-      // Extract dependencies from the function body (not params, those are local)
-      // Use Oddo AST identifiers, filter out function's own params, and only keep reactive ones
       const bodyIdentifiers = collectOddoIdentifiersOnly(oddoExpr.body);
       const ownParams = new Set((oddoExpr.parameters || []).map(p => p.name));
       const identifiers = bodyIdentifiers.filter(id => !ownParams.has(id) && isReactive(id));
+      const compositeDeps = collectCompositeDeps(oddoExpr.body);
+      const compositeSpreads = collectCompositeSpreads(oddoExpr.body);
       
-      const params = identifiers.map(id => t.identifier(id));
-      const deps = identifiers.map(id => t.identifier(id));
+      const params = [
+        ...identifiers.map(id => t.identifier(id)),
+        ...compositeDeps.map(dep => t.identifier(dep.paramName)),
+        ...compositeSpreads.map(sp => t.identifier(sp.paramName))
+      ];
+      const deps = [
+        ...identifiers.map(id => t.identifier(id)),
+        ...compositeDeps.map(dep => buildMemberExpression(dep.base, dep.path)),
+        ...compositeSpreads.map(sp => {
+          usedModifiers.add('compositeProxy');
+          return t.callExpression(
+            t.identifier(modifierAliases['compositeProxy']),
+            [t.identifier(sp.base)]
+          );
+        })
+      ];
 
-      // BEFORE converting body: mark effect dependencies as non-reactive in scope
-      // This prevents the body conversion from wrapping them with _lift
-      // They will be called with () by wrapDependenciesWithCalls after conversion
       const savedScope = currentScope;
       currentScope = Object.create(currentScope);
-      currentScope[reactiveScope] = false; // Nested functions don't need _liftFn for params
+      currentScope[reactiveScope] = false;
       for (const id of identifiers) {
         currentScope[id] = { type: 'param', reactive: false };
       }
+      for (const dep of compositeDeps) {
+        currentScope[dep.paramName] = { type: 'param', reactive: false };
+      }
+      // Shadow composite base variables so body doesn't re-collect their members
+      const shadowedBases = new Set();
+      for (const dep of compositeDeps) {
+        if (!shadowedBases.has(dep.base)) {
+          shadowedBases.add(dep.base);
+          currentScope[dep.base] = { type: 'param', reactive: false, composite: null };
+        }
+      }
+      for (const sp of compositeSpreads) {
+        if (!shadowedBases.has(sp.base)) {
+          shadowedBases.add(sp.base);
+          currentScope[sp.base] = { type: 'param', reactive: false, composite: null };
+        }
+      }
 
-      // Convert the body from Oddo AST to Babel AST
       let convertedBody;
       if (oddoExpr.body && oddoExpr.body.type === 'blockStatement') {
-        // Block body
         const statements = oddoExpr.body.body.map(stmt => convertStatement(stmt));
         convertedBody = t.blockStatement(statements);
       } else if (oddoExpr.body) {
-        // Expression body - wrap in block statement
         const exprBody = convertExpression(oddoExpr.body);
         convertedBody = t.blockStatement([t.expressionStatement(exprBody)]);
       } else {
         convertedBody = t.blockStatement([]);
       }
 
-      // Restore parent scope
       currentScope = savedScope;
 
-      // Create new arrow function with dependencies as params
       const arrowFunc = t.arrowFunctionExpression(params, convertedBody);
-
-      // Wrap dependency references with call expressions
       wrapDependenciesWithCalls(arrowFunc, identifiers);
+      wrapCompositeDepsWithCalls(arrowFunc, compositeDeps);
 
       const effectCall = t.callExpression(
         t.identifier(modifierAliases['effect']),
@@ -789,41 +1023,34 @@ const MODIFIER_TRANSFORMATIONS = {
   },
   mutable: {
     needsImport: false,
-    // @mutable x = 3 -> let x = 3;
-    // @mutable x = y + 1 (y is @state) -> let x = _lift((y) => y() + 1, [y])
-    // Receives Oddo AST, extracts deps from Oddo, converts internally
     transform: (oddoExpr, leftExpr) => {
       if (leftExpr && t.isIdentifier(leftExpr)) {
-        // Track this as a mutable variable for @mutate validation
         mutableVariables.add(leftExpr.name);
         
-        // Extract identifiers from Oddo AST
         const identifiers = collectOddoIdentifiersOnly(oddoExpr);
         const reactiveDeps = getReactiveDeps(identifiers);
+        const compositeDeps = collectCompositeDeps(oddoExpr);
+        const compositeSpreads = collectCompositeSpreads(oddoExpr);
+        const hasAnyDeps = reactiveDeps.length > 0 || compositeDeps.length > 0 || compositeSpreads.length > 0;
         
-        // Mark scope as non-reactive if there are reactive deps (will be lifted)
         const savedScope = currentScope;
-        if (reactiveDeps.length > 0) {
+        if (hasAnyDeps) {
           currentScope = Object.create(currentScope);
           currentScope[reactiveScope] = false;
         }
         
-        // Convert Oddo AST to Babel AST
         const valueExpr = convertExpression(oddoExpr);
         
-        // Restore scope
-        if (reactiveDeps.length > 0) {
+        if (hasAnyDeps) {
           currentScope = savedScope;
         }
         
-        // Check if expression contains reactive dependencies
-        const liftedExpr = createLiftedExpr(valueExpr, identifiers);
+        const liftedExpr = createLiftedExpr(valueExpr, identifiers, oddoExpr);
         
         return t.variableDeclaration('let', [
           t.variableDeclarator(leftExpr, liftedExpr || valueExpr)
         ]);
       }
-      // If no left side, just return the expression (convert from Oddo)
       return t.expressionStatement(convertExpression(oddoExpr));
     },
   },
@@ -888,13 +1115,18 @@ let currentScope = null;
 // Root scope is reactive; scopes inside dependency-tracking contexts are non-reactive
 const reactiveScope = Symbol("reactive-scope");
 
-// Variable info structure: { type: 'state'|'computed'|'mutable'|'immutable'|'param'|'import-oddo'|'import-js', reactive: boolean }
-function declareVariable(name, type) {
-  // Only state, computed, and oddo imports are reactive
-  // Regular params are NOT reactive (they receive plain values from callers)
-  // @component/@hook params use 'reactive-param' type and ARE reactive
+// Variable info structure: { type, reactive: boolean, composite: CompositeShape | null }
+// CompositeShape: { kind: 'object', members: { [key]: MemberInfo } }
+//               | { kind: 'function', returns: MemberInfo }
+//               | { kind: 'array', elements: MemberInfo[] }
+// MemberInfo: { reactive: true } | { reactive: false } | CompositeShape
+function declareVariable(name, type, composite = null) {
   const reactive = (type === 'state' || type === 'computed' || type === 'reactive-param' || type === 'import-oddo');
-  currentScope[name] = { type, reactive };
+  currentScope[name] = { type, reactive, composite };
+}
+
+function declareComposite(name, type, composite) {
+  currentScope[name] = { type, reactive: false, composite };
 }
 
 function isDeclared(name) {
@@ -907,6 +1139,41 @@ function isReactive(name) {
 
 function isNonReactive(name) {
   return currentScope[name]?.reactive === false;
+}
+
+function isComposite(name) {
+  return currentScope[name]?.composite != null;
+}
+
+function getCompositeShape(name) {
+  return currentScope[name]?.composite || null;
+}
+
+// Resolve a member access chain on a composite variable.
+// memberPath is an array of property names, e.g. ['user', 'name']
+// Returns the MemberInfo at the leaf: { reactive: true/false } or a CompositeShape, or null
+function resolveCompositePath(shape, memberPath) {
+  let current = shape;
+  for (const member of memberPath) {
+    if (!current) return null;
+    if (current.kind === 'object') {
+      current = current.members?.[member];
+    } else {
+      return null;
+    }
+  }
+  return current || null;
+}
+
+// Resolve what calling a composite function returns
+function resolveCompositeCall(shape) {
+  if (shape?.kind === 'function') return shape.returns;
+  return null;
+}
+
+// Check if a MemberInfo is a CompositeShape (has 'kind' property)
+function isCompositeShape(info) {
+  return info != null && info.kind != null;
 }
 
 function getVarType(name) {
@@ -976,6 +1243,444 @@ function generateUniqueId(baseName) {
   return candidate;
 }
 
+// Resolve a right-hand side expression to a composite shape using the current scope.
+// Handles call expressions (auth()), member access (data.user), and chained member access (data.user.name).
+function inferRightSideShape(expr) {
+  if (!expr) return null;
+
+  if (expr.type === 'call' && expr.callee?.type === 'identifier') {
+    const shape = getCompositeShape(expr.callee.name);
+    return resolveCompositeCall(shape);
+  }
+
+  if (expr.type === 'memberAccess') {
+    const path = [];
+    let current = expr;
+    while (current?.type === 'memberAccess') {
+      if (typeof current.property === 'string') path.unshift(current.property);
+      else return null;
+      current = current.object;
+    }
+    if (current?.type === 'identifier') {
+      const shape = getCompositeShape(current.name);
+      if (shape) return resolveCompositePath(shape, path);
+    }
+  }
+
+  if (expr.type === 'identifier') {
+    const info = currentScope[expr.name];
+    if (info?.composite) return info.composite;
+    if (info?.reactive) return { reactive: true };
+  }
+
+  return null;
+}
+
+// Declare destructured variable names from a composite shape.
+// Walks the destructuring pattern and composite shape in parallel.
+function declareDestructuredFromComposite(pattern, shape) {
+  if (!pattern || !shape) return;
+
+  if (pattern.type === 'objectPattern' && shape.kind === 'object') {
+    for (const prop of pattern.properties || []) {
+      if (prop.type === 'property') {
+        const keyName = prop.key?.name || prop.key?.value;
+        if (!keyName) continue;
+        const memberShape = shape.members?.[keyName];
+        const boundExpr = prop.shorthand ? prop.key : prop.value;
+
+        if (boundExpr?.type === 'identifier') {
+          declareScopeFromShape(boundExpr.name, memberShape);
+        } else if (boundExpr?.type === 'objectPattern' || boundExpr?.type === 'arrayPattern') {
+          declareDestructuredFromComposite(boundExpr, memberShape);
+        }
+      } else if (prop.type === 'restProperty' && prop.argument?.type === 'identifier') {
+        declareVariable(prop.argument.name, 'immutable');
+      }
+    }
+  }
+
+  if (pattern.type === 'arrayPattern' && shape.kind === 'array') {
+    for (let i = 0; i < (pattern.elements || []).length; i++) {
+      const el = pattern.elements[i];
+      if (!el) continue;
+      const memberShape = shape.elements?.[i];
+      if (el.type === 'identifier') {
+        declareScopeFromShape(el.name, memberShape);
+      } else if (el.type === 'objectPattern' || el.type === 'arrayPattern') {
+        declareDestructuredFromComposite(el, memberShape);
+      } else if (el.type === 'restElement' && el.argument?.type === 'identifier') {
+        declareVariable(el.argument.name, 'immutable');
+      }
+    }
+  }
+}
+
+// Declare a variable in scope based on a resolved MemberInfo shape
+function declareScopeFromShape(name, shape) {
+  if (!shape) {
+    declareVariable(name, 'immutable');
+  } else if (shape.reactive === true) {
+    currentScope[name] = { type: 'composite-member', reactive: true, composite: null };
+  } else if (isCompositeShape(shape)) {
+    declareComposite(name, 'composite-member', shape);
+  } else {
+    declareVariable(name, 'immutable');
+  }
+}
+
+// Replace inline composite evaluations in an expression with hoisted variable references.
+// Walks the Oddo AST expression tree and replaces composite calls (e.g., auth()) that are
+// used in member access or spread contexts with a hoisted variable identifier.
+// Does NOT recurse into arrow function bodies (those are separate scopes).
+function replaceInlineCompositeEvals(node, hoistedCalls) {
+  if (!node || typeof node !== 'object') return;
+
+  // Member access on a composite call: auth().email → _auth.email
+  if (node.type === 'memberAccess') {
+    let current = node;
+    while (current.object?.type === 'memberAccess') {
+      current = current.object;
+    }
+    if (current.object?.type === 'call' && current.object.callee?.type === 'identifier') {
+      const calleeName = current.object.callee.name;
+      if (isComposite(calleeName)) {
+        const callShape = getCompositeShape(calleeName);
+        if (callShape?.kind === 'function' && callShape.returns) {
+          const callKey = calleeName + '()';
+          if (!hoistedCalls.has(callKey)) {
+            const varName = generateUniqueId('_' + calleeName);
+            hoistedCalls.set(callKey, { varName, callNode: { ...current.object }, returnShape: callShape.returns });
+            declareScopeFromShape(varName, callShape.returns);
+            console.warn(`[oddo] Inline composite evaluation: ${callKey}. Consider binding to a variable.`);
+          }
+          current.object = { type: 'identifier', name: hoistedCalls.get(callKey).varName };
+        }
+      }
+    }
+  }
+
+  // Spread of a composite call: {...auth()} → {..._auth}
+  if ((node.type === 'spreadProperty' || node.type === 'spreadElement' || node.type === 'spread')) {
+    const arg = node.argument || node.expression;
+    if (arg?.type === 'call' && arg.callee?.type === 'identifier') {
+      const calleeName = arg.callee.name;
+      if (isComposite(calleeName)) {
+        const callShape = getCompositeShape(calleeName);
+        if (callShape?.kind === 'function' && callShape.returns) {
+          const callKey = calleeName + '()';
+          if (!hoistedCalls.has(callKey)) {
+            const varName = generateUniqueId('_' + calleeName);
+            hoistedCalls.set(callKey, { varName, callNode: { ...arg }, returnShape: callShape.returns });
+            declareScopeFromShape(varName, callShape.returns);
+            console.warn(`[oddo] Inline composite evaluation: ${callKey}. Consider binding to a variable.`);
+          }
+          const varRef = { type: 'identifier', name: hoistedCalls.get(callKey).varName };
+          if (node.argument) node.argument = varRef;
+          else node.expression = varRef;
+        }
+      }
+    }
+  }
+
+  for (const key of Object.keys(node)) {
+    if (key === 'type') continue;
+    const val = node[key];
+    if (Array.isArray(val)) {
+      val.forEach(item => {
+        if (item && typeof item === 'object') {
+          replaceInlineCompositeEvals(item, hoistedCalls);
+        }
+      });
+    } else if (val && typeof val === 'object') {
+      replaceInlineCompositeEvals(val, hoistedCalls);
+    }
+  }
+}
+
+// Hoist inline composite evaluations in a statement body.
+// Scans each statement for inline composite calls, replaces them with hoisted variables,
+// and inserts const declarations before the first use. Deduplicates per scope.
+function hoistInlineCompositeEvalsInBody(body) {
+  if (!body || !Array.isArray(body)) return;
+
+  const hoistedCalls = new Map();
+
+  let i = 0;
+  while (i < body.length) {
+    const stmt = body[i];
+    const prevSize = hoistedCalls.size;
+
+    replaceInlineCompositeEvals(stmt, hoistedCalls);
+
+    if (hoistedCalls.size > prevSize) {
+      const newHoists = Array.from(hoistedCalls.entries()).slice(prevSize);
+      for (let j = 0; j < newHoists.length; j++) {
+        const [, { varName, callNode }] = newHoists[j];
+        const hoistedStmt = {
+          type: 'expressionStatement',
+          _skipLift: true,
+          expression: {
+            type: 'variableDeclaration',
+            left: { type: 'identifier', name: varName },
+            right: callNode
+          }
+        };
+        body.splice(i, 0, hoistedStmt);
+        i++;
+      }
+    }
+
+    i++;
+  }
+}
+
+// Walk an AST node looking for arrow function bodies to process for inline hoisting
+function walkForNestedBodies(node) {
+  if (!node || typeof node !== 'object') return;
+
+  if (node.type === 'arrowFunction' && node.body) {
+    if (node.body.type === 'blockStatement' && node.body.body) {
+      hoistInlineCompositeEvalsInBody(node.body.body);
+    }
+    return;
+  }
+
+  for (const key of Object.keys(node)) {
+    if (key === 'type') continue;
+    const val = node[key];
+    if (Array.isArray(val)) {
+      val.forEach(item => walkForNestedBodies(item));
+    } else if (val && typeof val === 'object') {
+      walkForNestedBodies(val);
+    }
+  }
+}
+
+// Replace composite member access paths in an Oddo AST node with hoisted variable identifiers.
+function replaceCompositePaths(node, hoistedPaths) {
+  if (!node || typeof node !== 'object') return;
+
+  if (node.type === 'memberAccess') {
+    const path = [];
+    let current = node;
+    let parentChain = [node];
+    while (current?.type === 'memberAccess') {
+      if (typeof current.property === 'string') path.unshift(current.property);
+      else break;
+      current = current.object;
+      if (current?.type === 'memberAccess') parentChain.unshift(current);
+    }
+
+    if (current?.type === 'identifier') {
+      // Try longest path first, then shorter paths
+      for (let len = path.length; len > 0; len--) {
+        const subPath = path.slice(0, len);
+        const fullPath = current.name + '.' + subPath.join('.');
+        if (hoistedPaths.has(fullPath)) {
+          const varName = hoistedPaths.get(fullPath);
+          if (len === path.length) {
+            // Replace entire node with identifier
+            node.type = 'identifier';
+            node.name = varName;
+            delete node.object;
+            delete node.property;
+          } else {
+            // Replace the sub-chain with identifier and keep remaining path
+            const target = parentChain[len - 1];
+            if (target) {
+              let inner = target;
+              while (inner.object?.type === 'memberAccess') inner = inner.object;
+              inner.object = { type: 'identifier', name: varName };
+              // Remove the consumed path levels
+              for (let j = 0; j < len - 1; j++) {
+                const p = parentChain[j];
+                if (p.object?.type === 'memberAccess') {
+                  Object.assign(p, { ...p.object, property: p.property });
+                }
+              }
+            }
+          }
+          return;
+        }
+      }
+    }
+  }
+
+  for (const key of Object.keys(node)) {
+    if (key === 'type') continue;
+    const val = node[key];
+    if (Array.isArray(val)) {
+      val.forEach(item => replaceCompositePaths(item, hoistedPaths));
+    } else if (val && typeof val === 'object') {
+      replaceCompositePaths(val, hoistedPaths);
+    }
+  }
+}
+
+// Hoist composite member paths that are used in multiple reactive contexts
+// to shared const variables, avoiding repeated property chain access.
+function hoistMultiUseCompositePaths(body) {
+  if (!body || !Array.isArray(body)) return;
+
+  // Collect per-path: count of statements using it and first-use index
+  const pathInfo = new Map();
+
+  for (let i = 0; i < body.length; i++) {
+    const stmtPaths = new Set();
+    const deps = collectCompositeDeps(body[i], [], new Set());
+    for (const dep of deps) {
+      stmtPaths.add(dep.fullPath);
+    }
+    for (const fp of stmtPaths) {
+      if (!pathInfo.has(fp)) {
+        pathInfo.set(fp, { count: 1, firstUse: i });
+      } else {
+        pathInfo.get(fp).count++;
+      }
+    }
+  }
+
+  const hoistedPaths = new Map();
+
+  for (const [fullPath, info] of pathInfo) {
+    if (info.count > 1) {
+      const parts = fullPath.split('.');
+      const varName = generateUniqueId('_' + parts.join('_'));
+      hoistedPaths.set(fullPath, { varName, firstUse: info.firstUse });
+      currentScope[varName] = { type: 'composite-member', reactive: true, composite: null };
+    }
+  }
+
+  if (hoistedPaths.size === 0) return;
+
+  // Replace paths in AST before inserting declarations
+  for (const stmt of body) {
+    replaceCompositePaths(stmt, new Map(Array.from(hoistedPaths.entries()).map(([k, v]) => [k, v.varName])));
+  }
+
+  // Insert declarations at correct positions (sorted by firstUse ascending)
+  const sorted = Array.from(hoistedPaths.entries()).sort((a, b) => a[1].firstUse - b[1].firstUse);
+  let offset = 0;
+  for (const [fullPath, { varName, firstUse }] of sorted) {
+    const parts = fullPath.split('.');
+    let rightExpr = { type: 'identifier', name: parts[0] };
+    for (let i = 1; i < parts.length; i++) {
+      rightExpr = { type: 'memberAccess', object: rightExpr, property: parts[i] };
+    }
+    const hoistedStmt = {
+      type: 'expressionStatement',
+      _skipLift: true,
+      expression: {
+        type: 'variableDeclaration',
+        left: { type: 'identifier', name: varName },
+        right: rightExpr
+      }
+    };
+    body.splice(firstUse + offset, 0, hoistedStmt);
+    offset++;
+  }
+}
+
+// Find the return expression in an arrow function's body (Oddo AST)
+function findReturnExpression(arrowFn) {
+  if (!arrowFn.body) return null;
+  if (arrowFn.body.type !== 'blockStatement') return arrowFn.body;
+  for (const stmt of arrowFn.body.body) {
+    if (stmt.type === 'returnStatement') return stmt.argument;
+  }
+  return null;
+}
+
+// Infer a CompositeShape from an expression using a given scope for identifier lookup.
+// Returns { reactive: true }, { reactive: false }, or a CompositeShape, or null.
+function inferExpressionShape(expr, scope) {
+  if (!expr) return { reactive: false };
+
+  if (expr.type === 'identifier') {
+    const info = scope?.[expr.name];
+    if (!info) return { reactive: false };
+    if (info.composite) return info.composite;
+    if (info.reactive) return { reactive: true };
+    return { reactive: false };
+  }
+
+  if (expr.type === 'object') {
+    const members = {};
+    let hasReactiveOrComposite = false;
+    for (const prop of expr.properties || []) {
+      if (prop.type === 'spreadProperty') {
+        const argShape = inferExpressionShape(prop.argument, scope);
+        if (argShape?.kind === 'object') {
+          for (const [k, v] of Object.entries(argShape.members)) {
+            members[k] = v;
+            if (v.reactive === true || isCompositeShape(v)) hasReactiveOrComposite = true;
+          }
+        }
+        continue;
+      }
+      const keyName = prop.key?.name || prop.key?.value;
+      if (!keyName) continue;
+      const valueExpr = prop.shorthand ? prop.key : prop.value;
+      const memberShape = inferExpressionShape(valueExpr, scope);
+      if (memberShape?.reactive === true || isCompositeShape(memberShape)) {
+        hasReactiveOrComposite = true;
+      }
+      members[keyName] = memberShape || { reactive: false };
+    }
+    if (!hasReactiveOrComposite) return { reactive: false };
+    return { kind: 'object', members };
+  }
+
+  if (expr.type === 'array') {
+    const elements = [];
+    let hasReactiveOrComposite = false;
+    for (const el of expr.elements || []) {
+      if (!el) { elements.push({ reactive: false }); continue; }
+      const shape = inferExpressionShape(el, scope);
+      if (shape?.reactive === true || isCompositeShape(shape)) {
+        hasReactiveOrComposite = true;
+      }
+      elements.push(shape || { reactive: false });
+    }
+    if (!hasReactiveOrComposite) return { reactive: false };
+    return { kind: 'array', elements };
+  }
+
+  if (expr.type === 'arrowFunction') {
+    const fnScope = expr._scope || scope;
+    const returnExpr = findReturnExpression(expr);
+    if (!returnExpr) return { reactive: false };
+    const returnShape = inferExpressionShape(returnExpr, fnScope);
+    if (!returnShape || (returnShape.reactive === false && !isCompositeShape(returnShape))) return { reactive: false };
+    return { kind: 'function', returns: returnShape };
+  }
+
+  if (expr.type === 'call') {
+    const calleeName = expr.callee?.name;
+    if (calleeName) {
+      const calleeInfo = scope?.[calleeName];
+      if (calleeInfo?.composite?.kind === 'function') {
+        return calleeInfo.composite.returns;
+      }
+    }
+    return { reactive: false };
+  }
+
+  return { reactive: false };
+}
+
+// Infer the composite shape of a @hook/@component arrow function.
+// Returns a CompositeShape for the function, or null if the return is entirely nonreactive.
+function inferHookCompositeShape(arrowFn) {
+  const scope = arrowFn._scope;
+  const returnExpr = findReturnExpression(arrowFn);
+  if (!returnExpr) return null;
+  const returnShape = inferExpressionShape(returnExpr, scope);
+  if (!returnShape || (returnShape.reactive === false && !isCompositeShape(returnShape))) return null;
+  return { kind: 'function', returns: returnShape };
+}
+
 // Collect all identifiers from Oddo AST before conversion
 // Also builds scope chain with variable declarations using prototypal inheritance
 function collectOddoIdentifiers(node, names = new Set()) {
@@ -996,6 +1701,20 @@ function collectOddoIdentifiers(node, names = new Set()) {
   if (node.type === 'expressionStatement') {
     const left = node.expression?.left;
     const varName = left?.name;
+    const right = node.expression?.right;
+    
+    // Handle @hook and @component: process arrow function first, then infer composite shape
+    if (varName && (node.modifier === 'hook' || node.modifier === 'component') &&
+        right?.type === 'arrowFunction') {
+      collectOddoIdentifiers(right, names);
+      const compositeShape = inferHookCompositeShape(right);
+      if (compositeShape) {
+        declareComposite(varName, node.modifier, compositeShape);
+      } else {
+        declareVariable(varName, 'immutable');
+      }
+      return names;
+    }
     
     // Handle @state with array pattern: @state [x, setX] = value
     if (node.modifier === 'state' && left?.type === 'arrayPattern' && left.elements?.length === 2) {
@@ -1012,9 +1731,26 @@ function collectOddoIdentifiers(node, names = new Set()) {
       } else if (node.modifier === 'mutable') {
         declareVariable(varName, 'mutable');
       } else if (!node.modifier && node.expression?.type === 'variableDeclaration') {
-        declareVariable(varName, 'immutable');
+        // Check if right side resolves to a composite shape
+        const rightShape = inferRightSideShape(right);
+        if (rightShape) {
+          declareScopeFromShape(varName, rightShape);
+        } else {
+          declareVariable(varName, 'immutable');
+        }
       }
-      // Other modifiers (effect, mutate, react) don't declare named variables in the same way
+    } else if (!node.modifier && node.expression?.type === 'variableDeclaration' && left) {
+      // Destructuring pattern on the left side: { a, b } = compositeCall()
+      const rightShape = inferRightSideShape(right);
+      if (rightShape && isCompositeShape(rightShape)) {
+        declareDestructuredFromComposite(left, rightShape);
+      } else if (left.type === 'objectPattern' || left.type === 'arrayPattern') {
+        // Not composite — just declare all names as immutable
+        const boundNames = extractBoundNames(left);
+        for (const name of boundNames) {
+          declareVariable(name, 'immutable');
+        }
+      }
     }
   }
 
@@ -1125,14 +1861,19 @@ export function compileToJS(ast, config = {}) {
   currentScope = null;
   
   // Pre-pass: collect all identifiers and build scope chain with variable types
-  // This populates usedNames and sets up moduleScope/currentScope with prototypal inheritance
   usedNames = collectOddoIdentifiers(ast);
+
+  // Post-pre-pass: hoist inline composite evaluations (e.g., auth().email)
+  hoistInlineCompositeEvalsInBody(ast.body);
+
+  // Post-pre-pass: hoist multi-use composite member paths to shared variables
+  hoistMultiUseCompositePaths(ast.body);
 
   // First pass: Convert AST with temporary placeholder identifiers
   // Modifiers: state, computed, react, mutate, effect
   // JSX Pragmas: e (element), c (component), x (expression), f (fragment)
   // Helpers: stateProxy
-  const allImports = ['state', 'computed', 'mutate', 'effect', 'stateProxy', 'arraySplice', 'lift', 'liftFn', 'e', 'c', 'x', 'f'];
+  const allImports = ['state', 'computed', 'mutate', 'effect', 'stateProxy', 'arraySplice', 'lift', 'liftFn', 'compositeProxy', 'e', 'c', 'x', 'f'];
   for (const name of allImports) {
     modifierAliases[name] = `__ODDO_IMPORT_${name}__`;
   }
@@ -1354,40 +2095,40 @@ function convertExpressionStatement(stmt) {
     }
   }
 
-  // In Oddo, = is a declaration (const), := is an assignment (expression)
-  // Handle variable declaration before converting as expression
   if (stmt.expression && stmt.expression.type === 'variableDeclaration') {
+    // Hoisted composite declarations bypass lifting
+    if (stmt._skipLift) {
+      const left = convertExpression(stmt.expression.left);
+      const right = convertExpression(stmt.expression.right);
+      return t.variableDeclaration('const', [t.variableDeclarator(left, right)]);
+    }
+
     const left = convertExpression(stmt.expression.left);
     const oddoRight = stmt.expression.right;
     
-    // Variable is already tracked in scope during pre-pass
-    
-    // Check if expression contains reactive dependencies
-    // Skip lifting for arrow functions - they handle their own lifting via createArrowFunction
     let finalExpr;
     if (oddoRight.type !== 'arrowFunction') {
       const identifiers = collectOddoIdentifiersOnly(oddoRight);
       const reactiveDeps = getReactiveDeps(identifiers);
+      const compositeDeps = collectCompositeDeps(oddoRight);
+      const compositeSpreads = collectCompositeSpreads(oddoRight);
+      const hasAnyDeps = reactiveDeps.length > 0 || compositeDeps.length > 0 || compositeSpreads.length > 0;
       
-      // Mark scope as non-reactive if there are reactive deps (will be lifted)
       const savedScope = currentScope;
-      if (reactiveDeps.length > 0) {
+      if (hasAnyDeps) {
         currentScope = Object.create(currentScope);
         currentScope[reactiveScope] = false;
       }
       
-      // Convert Oddo AST to Babel AST
       const right = convertExpression(oddoRight);
       
-      // Restore scope
-      if (reactiveDeps.length > 0) {
+      if (hasAnyDeps) {
         currentScope = savedScope;
       }
       
-      const liftedExpr = createLiftedExpr(right, identifiers);
+      const liftedExpr = createLiftedExpr(right, identifiers, oddoRight);
       finalExpr = liftedExpr || right;
     } else {
-      // Arrow functions handle their own lifting
       finalExpr = convertExpression(oddoRight);
     }
     
@@ -1406,12 +2147,13 @@ function convertExpressionStatement(stmt) {
                         stmt.expression.type !== 'arraySliceAssignment';
     
     if (isPlainExpr) {
-      // Stop at arrow functions - each handles its own reactive deps via _liftFn
       const allIdentifiers = collectOddoIdentifiersOnly(stmt.expression, new Set(), false, true);
       const reactiveDeps = allIdentifiers.filter(id => isReactive(id));
+      const compositeDeps = collectCompositeDeps(stmt.expression, [], new Set(), false, true);
+      const compositeSpreads = collectCompositeSpreads(stmt.expression, [], new Set(), false, true);
+      const hasAnyDeps = reactiveDeps.length > 0 || compositeDeps.length > 0 || compositeSpreads.length > 0;
       
-      if (reactiveDeps.length > 0) {
-        // Mark scope as non-reactive for conversion
+      if (hasAnyDeps) {
         const savedScope = currentScope;
         currentScope = Object.create(currentScope);
         currentScope[reactiveScope] = false;
@@ -1420,12 +2162,26 @@ function convertExpressionStatement(stmt) {
         
         currentScope = savedScope;
         
-        // Wrap with _lift
         usedModifiers.add('lift');
-        const prefixedParams = reactiveDeps.map(id => t.identifier('_' + id));
-        const deps = reactiveDeps.map(id => t.identifier(id));
+        const prefixedParams = [
+          ...reactiveDeps.map(id => t.identifier('_' + id)),
+          ...compositeDeps.map(dep => t.identifier(dep.paramName)),
+          ...compositeSpreads.map(sp => t.identifier(sp.paramName))
+        ];
+        const deps = [
+          ...reactiveDeps.map(id => t.identifier(id)),
+          ...compositeDeps.map(dep => buildMemberExpression(dep.base, dep.path)),
+          ...compositeSpreads.map(sp => {
+            usedModifiers.add('compositeProxy');
+            return t.callExpression(
+              t.identifier(modifierAliases['compositeProxy']),
+              [t.identifier(sp.base)]
+            );
+          })
+        ];
         const arrowFunc = t.arrowFunctionExpression(prefixedParams, convertedExpr);
         wrapDependenciesWithCalls(arrowFunc, reactiveDeps, '_');
+        wrapCompositeDepsWithCalls(arrowFunc, compositeDeps);
         expression = t.callExpression(
           t.identifier(modifierAliases['lift']),
           [arrowFunc, t.arrayExpression(deps)]
@@ -1661,29 +2417,27 @@ function convertArrowFunction(expr) {
   // Check if we're in a reactive scope (where params could be called with reactive values)
   const inReactiveScope = savedScope?.[reactiveScope] !== false;
   
-  // BEFORE converting body: find reactive deps that will be captured
-  // These will become additional params via _liftFn, so treat them as non-reactive inside
-  // In non-reactive scopes, don't collect deps - they're already unwrapped by parent
   const bodyIdentifiers = collectOddoIdentifiersOnly(expr.body);
   const reactiveDepsForBody = inReactiveScope ? bodyIdentifiers.filter(id => {
-    // Check if it's reactive in parent scope (not current function scope)
-    // and not already a param of this function
     const isOwnParam = expr.parameters?.some(p => p.name === id);
     if (isOwnParam) return false;
-    
-    // Check parent scope for reactivity
     const varInfo = savedScope?.[id];
     return varInfo?.reactive === true;
   }) : [];
+
+  // Collect composite deps from body in the parent scope context
+  const compositeDepsForBody = inReactiveScope ? collectCompositeDeps(expr.body) : [];
+  const compositeSpreadsForBody = inReactiveScope ? collectCompositeSpreads(expr.body) : [];
   
-  // Add reactive deps as virtual params in current scope (so body doesn't wrap them)
   for (const dep of reactiveDepsForBody) {
-    currentScope[dep] = { type: 'param', reactive: false }; // Treat as non-reactive param
+    currentScope[dep] = { type: 'param', reactive: false };
+  }
+  for (const dep of compositeDepsForBody) {
+    currentScope[dep.paramName] = { type: 'param', reactive: false };
   }
   
-  // If this function will be wrapped with _liftFn, mark scope as non-reactive
-  // Nested functions don't need _liftFn just for having params
-  if (reactiveDepsForBody.length > 0) {
+  const hasAnyLiftDeps = reactiveDepsForBody.length > 0 || compositeDepsForBody.length > 0 || compositeSpreadsForBody.length > 0;
+  if (hasAnyLiftDeps) {
     currentScope[reactiveScope] = false;
   }
   
@@ -1726,17 +2480,29 @@ function convertArrowFunction(expr) {
   // Restore parent scope
   currentScope = savedScope;
 
-  // Wrap with _liftFn ONLY when the function body captures reactive variables from the parent scope.
-  // Call sites handle unwrapping, so functions don't need _liftFn just for having params.
-  if (reactiveDepsForBody.length > 0) {
+  if (hasAnyLiftDeps) {
     usedModifiers.add('liftFn');
     
-    // Prepend reactive dep params to original params
-    const depParams = reactiveDepsForBody.map(id => t.identifier(id));
+    const depParams = [
+      ...reactiveDepsForBody.map(id => t.identifier(id)),
+      ...compositeDepsForBody.map(dep => t.identifier(dep.paramName)),
+      ...compositeSpreadsForBody.map(sp => t.identifier(sp.paramName))
+    ];
     const allParams = [...depParams, ...params];
-    const depsArray = reactiveDepsForBody.map(id => t.identifier(id));
+    const depsArray = [
+      ...reactiveDepsForBody.map(id => t.identifier(id)),
+      ...compositeDepsForBody.map(dep => buildMemberExpression(dep.base, dep.path)),
+      ...compositeSpreadsForBody.map(sp => {
+        usedModifiers.add('compositeProxy');
+        return t.callExpression(
+          t.identifier(modifierAliases['compositeProxy']),
+          [t.identifier(sp.base)]
+        );
+      })
+    ];
     
     const liftedFunc = t.arrowFunctionExpression(allParams, body);
+    wrapCompositeDepsWithCalls(liftedFunc, compositeDepsForBody);
     
     return t.callExpression(
       t.identifier(modifierAliases['liftFn']),

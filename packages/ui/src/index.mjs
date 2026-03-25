@@ -9,7 +9,8 @@ export {
   lift,
   liftFn,
   // liftValue,
-  arraySplice
+  arraySplice,
+  compositeProxy
 } from "./framework/reactive.mjs"
 
 export {

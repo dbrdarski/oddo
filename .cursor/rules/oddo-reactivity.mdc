@@ -1,71 +1,289 @@
 ---
-description: Oddo compiler reactivity rules - how reactive values are tracked, wrapped, and propagated
-globs: packages/lang/src/compiler.mjs
+description: Oddo compiler & runtime reactivity system — core primitives, composite types, compilation rules, scope tracking, and edge cases
+globs: packages/lang/src/compiler.mjs,packages/ui/src/framework/reactive.mjs,packages/ui/src/index.mjs
+alwaysApply: false
 ---
 
-# Oddo Reactivity Compilation Rules
+# Oddo Reactivity System
 
-## Variable Reactivity Classification
+## Architecture Overview
 
-| Type | Reactive? | Examples |
+Oddo is a compiled reactive language. The developer writes Oddo source with modifiers (`@state`, `@computed`, `@effect`, etc.). The compiler (`packages/lang/src/compiler.mjs`) transforms this into JavaScript that calls runtime primitives from `@oddo/ui` (`packages/ui/src/framework/reactive.mjs`).
+
+**Key principle**: reactivity is handled at the *point of use*, not the point of definition. The compiler wraps expressions where reactive values are consumed. Functions don't need wrapping just because they *might* receive reactive args — the call site handles that.
+
+The compilation pipeline:
+1. **Parse**: Oddo source → Oddo AST (via Chevrotain parser + AST converter)
+2. **Pre-pass** (`collectOddoIdentifiers`): Walk Oddo AST, build scope chain with prototypal inheritance (`Object.create`), classify variables by reactivity type, infer composite shapes
+3. **Post-pre-pass**: Hoist inline composite evaluations, hoist multi-use composite member paths
+4. **Convert** (`convertProgram`): Walk Oddo AST, emit Babel AST with reactive wrapping based on scope info
+5. **Finalize**: Replace placeholder import names with unique identifiers, add runtime import declaration, generate JS via Babel
+
+## Runtime Primitives (`reactive.mjs`)
+
+### `reactiveSymbol`
+A `Symbol.for("oddo::is-reactive-handler-property-symbol")` used as a property key on objects to mark them as reactive. Any object with `obj[reactiveSymbol] = { getter }` is a ReactiveContainer.
+
+### `ReactiveContainer`
+Wraps a getter function. The getter signature is `getter(cleanup?)` — if `cleanup` is provided, the container subscribes the cleanup function so it's called when the value changes. Calling `getter()` without cleanup just reads the current value.
+
+### `state(initialValue)`
+Returns `[ReactiveContainer, setter]`. The container's getter subscribes callers. The setter updates the value and notifies subscribers. This is the fundamental writable reactive primitive.
+
+### `computed(fn, deps)`
+Returns a ReactiveContainer with lazy caching. `deps` is an array of ReactiveContainers. The runtime calls `bindDependencies(deps, invalidateCallback)` which subscribes to each dep — when any dep changes, the cache is invalidated and subscribers are notified. The `fn` receives bound getters (functions that return current values).
+
+### `effect(fn, deps)`
+Side-effect that runs immediately and re-runs when deps change. No return value. Uses `schedule()` for batching via microtask queue.
+
+### `lift(fn, deps)`
+Immediate evaluation: `fn(...bindDependencies(deps))`. Used for one-time reactive value reads (e.g., `@state` initializer with reactive deps).
+
+### `liftFn(callbackFn, deps)`
+Returns a new function that, when called, unwraps both `deps` and the caller's args via `liftValue`. Used when arrow functions capture reactive variables from parent scope. At call time, the reactive values are read and passed as plain values.
+
+### `liftValue(arg)`
+If `arg` has `reactiveSymbol`, calls its getter (no subscription). Otherwise returns `arg` as-is. Used for unwrapping function arguments at call sites.
+
+### `bindDependencies(deps, cleanup)`
+Maps each dep: if it's a ReactiveContainer, binds its getter with the cleanup callback (subscribing). Otherwise wraps in `() => dep`. Returns an array of getter functions.
+
+### `stateProxy(target)`
+Creates a copy-on-write Proxy over an object/array for use inside `@mutate` bodies. Tracks nested property access via child proxies.
+
+### `createAccessor(target)`
+Read-only Proxy used for component props. When accessing a property on a reactive target, creates a computed expression that reads the property reactively. Enables `props.name` to automatically track reactive changes.
+
+### `transact(mutator, finalizer, targets, otherValues)` (aliased as `mutate`)
+Creates a mutation function. When called, creates stateProxies over targets, passes them to the mutator along with unwrapped otherValues and args. The finalizer commits state changes.
+
+### `compositeProxy(target)`
+Wraps a composite object as a single ReactiveContainer. Its getter calls `resolveAndSubscribe(target, cleanup)` which recursively walks the composite tree: for each member, if it's a ReactiveContainer, subscribes and reads; if it's a nested object/array, recurses; otherwise passes through. Returns a fully-resolved plain object. Used for spreading composites in dep-unwrapping contexts like `@computed`, `@effect`, `_lift`.
+
+## Compiler: Variable Reactivity Classification
+
+The scope system uses prototypal inheritance: `Object.create(parentScope)`. Each variable entry has `{ type, reactive: boolean, composite: CompositeShape | null }`.
+
+| Type | `reactive` | Purpose |
 |---|---|---|
-| `@state` | Yes | `@state x = 3` |
-| `@computed` | Yes | `@computed sum = a + b` |
-| `reactive-param` | Yes | `@component` / `@hook` params |
-| `import-oddo` | Yes | `import Btn from "./Btn.oddo"` |
-| `param` | **No** | Regular arrow fn params |
-| `immutable` | No | `x = 5` (plain declaration) |
-| `mutable` | No | `@mutable x = 5` |
-| `import-js` | No | `import $ from "jquery"` |
-| Undeclared/global | No | `console`, `Math`, `document` |
+| `state` | `true` | `@state x = 3` |
+| `computed` | `true` | `@computed sum = a + b` |
+| `reactive-param` | `true` | `@component`/`@hook` params |
+| `import-oddo` | `true` | `import X from "./X.oddo"` |
+| `composite-member` | `true` | Reactive leaf from composite destructuring |
+| `param` | `false` | Regular arrow function params |
+| `immutable` | `false` | `x = 5` (plain `const` declaration) |
+| `mutable` | `false` | `@mutable x = 5` (`let` declaration) |
+| `import-js` | `false` | `import $ from "jquery"` |
+| `composite-member` | `false` | Nonreactive leaf or composite sub-shape from destructuring |
+| (undeclared) | N/A | Globals like `console`, `Math` — excluded from deps |
 
-Only `@state`, `@computed`, `reactive-param`, and `import-oddo` are reactive. Regular arrow function params (`param` type) are NOT reactive — only `@component`/`@hook` params (`reactive-param`) are.
+**Critical**: `isReactive(name)` checks `currentScope[name]?.reactive === true`. Only reactive variables trigger dep collection and wrapping. Composite variables themselves have `reactive: false` — their *members* may be reactive.
 
-## Core Principle
+## Compiler: Wrapping Rules
 
-**Reactivity is handled at the point of use (call site), not the point of definition.** The compiler wraps expressions where reactive values are consumed. Functions don't need `_liftFn` wrapping just because they might theoretically be called with reactive args — the call site already unwraps via `_lift` / `_x` / `_computed`.
+### `_liftFn` (arrow functions capturing reactive deps)
+- Wrap ONLY when body captures reactive variables from parent scope
+- Deps become prepended params: `_liftFn((dep, originalParam) => body, [dep])`
+- NEVER wrap with empty deps — no reactive parent deps means plain arrow function
+- Inside the body: scope is non-reactive; deps are unwrapped by `liftValue` at call time
 
-## Wrapping Rules
+### `_x` / `createJsxExpression` (JSX child expressions)
+- ALWAYS wrap non-literal dynamic expressions, even with zero deps: `_x(() => expr, [])`
+- Needed for DOM render pipeline lifecycle (cleanup, patching)
+- With reactive deps: `_x((_dep) => _dep(), [dep])`
+- Literals returned directly
 
-### `_liftFn` (arrow functions)
-
-- Wrap ONLY when the function body captures reactive variables from the parent scope
-- These deps become prepended params: `_liftFn((dep, originalParam) => body, [dep])`
-- NEVER wrap with empty deps `[]` — if there are no reactive deps from the parent scope, it's just a plain arrow function
-- Inside the wrapped body: deps are treated as non-reactive (already unwrapped)
-
-### `_x` / `createJsxExpression` (JSX child expressions `{expr}`)
-
-- ALWAYS wrap non-literal dynamic expressions, even with zero reactive deps: `_x(() => expr, [])`
-- Needed for DOM render pipeline lifecycle (effects, cleanup, patching)
-- With reactive deps: `_x((_dep) => ... _dep() ..., [dep])`
-- Literals returned directly: `{"hello"}` -> `"hello"`
-
-### `_computed` (JSX attribute expressions `attr={expr}`)
-
-- Wrap ONLY when the expression has reactive deps: `_computed((_dep) => ... _dep() ..., [dep])`
-- With zero reactive deps: return the expression directly (no wrapping)
-- Literals already returned directly
-- `patchAttributes` handles both plain values and ReactiveContainers, so wrapping is pure overhead when no deps exist
+### `_computed` (JSX attribute expressions)
+- Wrap ONLY when expression has reactive deps
+- Zero deps: return expression directly (patchAttributes handles both plain values and ReactiveContainers)
 
 ### `_lift` (plain reactive expressions)
-
 - Wrap when a non-function expression references reactive variables
-- With zero reactive deps: expression is used as-is
+- Zero deps: expression used as-is
 
 ### `_computed` modifier (`@computed x = expr`)
+- Always wraps with deps; scope inside is non-reactive
 
-- Always wraps with deps from expression
-- Scope inside is non-reactive
+### `_effect` modifier (`@effect () => { body }`)
+- Collects deps from body; scope inside is non-reactive
 
-### `_effect` modifier (`@effect () => { ... }`)
+### `_state` modifier (`@state [x, setX] = initializer`)
+- If initializer has reactive deps, wraps with `_state(_lift(...))`
 
-- Always wraps with deps from body
-- Scope inside is non-reactive
+### `_mutate` / `transact` modifier (`@mutate fn = () => { mutations }`)
+- Complex: extracts state targets, outer reactive deps, builds stateProxy usage
+- `transact(mutator, finalizer, stateContainers, outerDeps)`
+- Scope inside is non-reactive; callable ids (state + outer deps) are wrapped with `()`
 
 ## Scope Rules
 
-- **Module scope**: `reactiveScope = true` — but this only affects which parent-scope variables are collected as deps for `_liftFn`, NOT whether to wrap functions that have no deps
+- **Module scope**: `reactiveScope = true` (symbol key on scope object)
 - **Inside `_liftFn` with deps**: `reactiveScope = false`
-- **Inside `@computed` / `@effect` / JSX expression scopes**: `reactiveScope = false`
-- **Inside `@component` / `@hook`**: Inherits from parent; params are `reactive-param`
+- **Inside `@computed` / `@effect` / `@mutate` / JSX expression scopes**: `reactiveScope = false`
+- **Inside `@component` / `@hook`**: params are `reactive-param`; body processes reactivity normally
+- A scope inheriting `reactiveScope = false` means nested arrow functions don't collect deps for `_liftFn` — they're already inside a dep-unwrapping context
+
+## Composite Reactivity Type
+
+### Concept
+
+A **composite** is a value (object, array, or function return) whose members have *mixed* reactivity — some are ReactiveContainers, some are plain values. The composite itself is NOT reactive (`reactive: false`), but the compiler tracks its internal shape so that member accesses can be classified correctly.
+
+Composites arise from `@hook` and `@component` functions that return objects containing `@state` or `@computed` members alongside nonreactive values.
+
+### CompositeShape Data Structure
+
+```js
+// Object: { kind: 'object', members: { [key]: MemberInfo } }
+// Function: { kind: 'function', returns: MemberInfo }
+// Array: { kind: 'array', elements: MemberInfo[] }
+// MemberInfo = { reactive: true } | { reactive: false } | CompositeShape
+```
+
+Example for `@hook useAuth` returning `{ email, sessionToken, silentLogin }` where `email` and `sessionToken` are `@state`:
+```js
+{
+  kind: 'function',
+  returns: {
+    kind: 'object',
+    members: {
+      email: { reactive: true },
+      sessionToken: { reactive: true },
+      silentLogin: { reactive: false }
+    }
+  }
+}
+```
+
+### Shape Inference
+
+During the pre-pass (`collectOddoIdentifiers`), when processing `@hook` or `@component`:
+1. The arrow function body is traversed first (populating its child scope with `@state`/`@computed` etc.)
+2. `inferHookCompositeShape(arrowFn)` finds the return statement
+3. `inferExpressionShape(returnExpr, scope)` recursively builds the shape:
+   - Identifiers: lookup in scope → reactive / nonreactive / composite sub-shape
+   - Object literals: check each property recursively; if any member is reactive or composite, the object is composite; otherwise nonreactive
+   - Array literals: similar to objects
+   - Arrow functions: infer return shape → `{ kind: 'function', returns: ... }`
+   - Call expressions on composite functions: return the function's return shape
+4. If all members are nonreactive, the return is `{ reactive: false }` (NOT composite)
+5. Composite shapes are stored on the variable: `declareComposite(name, type, shape)`
+
+### Composite-Aware Variable Declaration
+
+In the pre-pass, when a variable declaration has a composite right-hand side:
+
+- **Simple assignment from composite call**: `data = useAuth()` → `declareScopeFromShape('data', returnShape)`. If the return is composite, `data` gets `composite: returnShape, reactive: false`.
+- **Simple assignment from composite member**: `user = data.user` → resolve through `data`'s composite shape, declare with the member's reactivity.
+- **Destructuring from composite call**: `{ email, token } = useAuth()` → `declareDestructuredFromComposite(pattern, returnShape)` walks the pattern and shape in parallel. Each destructured name gets its reactivity from the shape: `email` → `{ type: 'composite-member', reactive: true }`, nonreactive members → `{ type: 'immutable' }`, sub-composites → `declareComposite(...)`.
+- **Nested destructuring**: `{ user: { name } } = useAuth()` → recurses through shape levels.
+
+**Why destructured reactive members get `type: 'composite-member'` with `reactive: true`**: After destructuring, `email` IS a ReactiveContainer. The compiler treats it exactly like a `@state` variable for dependency purposes — it appears in dep arrays and gets unwrapped with `()`.
+
+### Composite Dependency Collection
+
+Two new collection functions (used alongside the existing `collectOddoIdentifiersOnly` + `getReactiveDeps`):
+
+**`collectCompositeDeps(node)`**: Walks Oddo AST. When it finds a `memberAccess` chain where the root is a composite variable, resolves the path through the composite shape. If the leaf is reactive, collects `{ base, path, paramName, fullPath }`. Example: `data.user.name` where `name` is reactive → `{ base: 'data', path: ['user', 'name'], paramName: '_data_user_name', fullPath: 'data.user.name' }`. Deduplicates by `fullPath`.
+
+**`collectCompositeSpreads(node)`**: Finds spread operations (`...data`) where the spread argument is a composite variable. Returns `{ base, paramName }`.
+
+### Composite Dep Emission
+
+At each emission point (modifier transforms, `createLiftedExpr`, `createReactiveExpr`, `convertArrowFunction`, plain expression handler):
+
+1. Collect regular reactive deps (existing)
+2. Collect composite member deps via `collectCompositeDeps`
+3. Collect composite spreads via `collectCompositeSpreads`
+4. Merge all into params and dep arrays:
+   - Regular deps: `params = [t.identifier(id)]`, `deps = [t.identifier(id)]`
+   - Composite member deps: `params = [t.identifier('_data_email')]`, `deps = [data.email]` (MemberExpression)
+   - Composite spreads: `params = [t.identifier('_data_spread')]`, `deps = [_compositeProxy(data)]`
+
+**Body transformation**: `wrapDependenciesWithCalls` handles regular deps (replaces identifiers with call expressions). `wrapCompositeDepsWithCalls` handles composite deps (finds MemberExpression patterns and replaces with param call expressions).
+
+### Scope Shadowing in Dep-Unwrapping Contexts
+
+**Critical edge case**: When `@effect`, `@computed`, or `@mutate` collects composite deps, the composite base variables must be shadowed as non-composite in the inner scope. Otherwise, the body conversion would re-collect the same composite deps and double-wrap them.
+
+Example without shadowing: `@effect () => { console.log(data.sessionToken) }` would:
+1. Effect transform collects `data.sessionToken` as dep ✓
+2. Body conversion sees `console.log(data.sessionToken)` as plain expression with composite dep → wraps with `_lift` ✗ (double-wrap!)
+
+Fix: After collecting composite deps, shadow the base variable: `currentScope[dep.base] = { type: 'param', reactive: false, composite: null }`. This removes the composite shape from the inner scope, preventing re-collection. The actual dep is already in the effect's dep array.
+
+### Inline Composite Evaluation (Warning + Hoist)
+
+When the compiler encounters `auth().email` or `{...auth()}` — a composite function called inline without being bound to a variable:
+
+1. **Warning**: `console.warn('[oddo] Inline composite evaluation: auth(). Consider binding to a variable.')`
+2. **Hoist**: Extract the call to a `const` declaration before the current statement
+3. **Deduplication**: Same call expression across statements in the same scope shares one hoisted variable
+
+Implementation:
+- **`replaceInlineCompositeEvals(node, hoistedCalls)`**: Walks the Oddo AST (including into arrow function bodies). When it finds a `memberAccess` or `spread` whose base/argument is a call to a composite function, replaces the call with a hoisted variable identifier.
+- **`hoistInlineCompositeEvalsInBody(body)`**: Orchestrates the scan, inserts `const _auth = auth()` statements before the first use. Uses `_skipLift: true` flag on hoisted statements to prevent the conversion phase from re-lifting them.
+- Runs after the pre-pass, before conversion.
+
+**Why recurse into arrow functions**: `@effect () => { console.log(auth().email) }` — the `auth()` is inside the effect's arrow function, but should be hoisted to the program level. All inline calls to the same composite function in the same body share one hoisted variable.
+
+### Multi-Use Optimization
+
+When the same composite member path (e.g., `data.email`) appears as a dep in multiple reactive contexts in the same scope, hoist it to a shared variable:
+
+```
+data.email used in @computed + @effect + @state initializer
+→ const _data_email = data.email;  (hoisted before first use)
+→ All contexts reference _data_email instead of data.email
+```
+
+Implementation:
+- **`hoistMultiUseCompositePaths(body)`**: Counts path occurrences across statements. For count > 1, generates a hoisted `const` declaration with `_skipLift: true`. Uses `replaceCompositePaths(node, hoistedPaths)` to replace member-expression patterns in the AST with the hoisted variable identifier.
+- The hoisted variable is declared as `{ type: 'composite-member', reactive: true }` in scope. This effectively "promotes" the composite member path to a regular reactive variable, so the existing dep system handles it naturally.
+- Runs after inline composite hoisting, before conversion.
+
+### Case-by-Case: No Special Handling Needed
+
+- **JSX element spread of a composite variable** (`<input {...data} />`): The runtime `patchAttributes` iterates object keys and checks each value for `reactiveSymbol`. ReactiveContainers get individual effects. No compile-time composite work needed.
+- **liftFn body spread** (`() => ({...data})`): ReactiveContainers pass through as object values. The spread produces a new object with ReactiveContainer members. Result is composite.
+- **Plain expression spread (no reactive deps)**: Same as above.
+
+### Case-by-Case: Compile-Time Only (Member Expressions as Deps)
+
+All contexts where reactive deps are collected now also collect composite member deps:
+- `@computed`: `_computed((_data_email) => _data_email() + "...", [data.email])`
+- `@effect`: `_effect((_data_email) => { ... _data_email() ... }, [data.email])`
+- `@state` initializer: `_state(_lift((_data_email) => _data_email(), [data.email]))`
+- `@mutate` (outer deps): composite members in the outer deps array
+- `liftFn` (captured deps): composite members in dep array
+- JSX child/attribute expressions: composite members as deps in `_x` / `_computed`
+- Plain expressions with reactive deps: composite members as deps in `_lift`
+
+### Case-by-Case: Compile-Time + Runtime (`compositeProxy`)
+
+Spreading a composite in a dep-unwrapping context (`@computed`, `@effect`, `_lift`, `@mutate`):
+```
+@computed allData = { ...data, extra: "value" }
+→ _computed(_data_spread => ({ ...data, extra: "value" }), [_compositeProxy(data)])
+```
+At runtime, `compositeProxy` wraps the composite as a single ReactiveContainer. When `bindDependencies` processes it, the getter recursively walks the tree, subscribes to reactive members, and returns a fully-resolved plain object.
+
+### The `_skipLift` Flag
+
+Hoisted declarations (from both inline eval hoisting and multi-use path hoisting) use `_skipLift: true` on the Oddo AST statement node. This tells `convertExpressionStatement` to bypass the normal lifting logic and emit a plain `const x = expr;` without checking for reactive/composite deps. Without this, the hoisted `const _auth = auth()` would incorrectly be wrapped with `_lift` (since `auth` might be composite in scope), and `const _data_email = data.email` would be wrapped with `_lift` (since `data.email` is a reactive composite member).
+
+### Scope Considerations for `Object.create(null)`
+
+The module scope is created with `Object.create(null)` — it has NO prototype chain. This means `hasOwnProperty` is NOT available as a method. All scope property existence checks must use `Object.prototype.hasOwnProperty.call(scope, name)` instead of `scope.hasOwnProperty(name)`.
+
+## Files Overview
+
+- **`packages/lang/src/compiler.mjs`**: Oddo AST → Babel AST. Contains scope tracking, modifier transformations, composite shape inference, dep collection, dep emission, inline hoisting, multi-use hoisting, expression/statement conversion.
+- **`packages/ui/src/framework/reactive.mjs`**: Runtime reactive primitives (state, computed, effect, lift, liftFn, liftValue, stateProxy, createAccessor, compositeProxy, etc.)
+- **`packages/ui/src/framework/dom.mjs`**: DOM rendering (createElement, createComponent, createJsxExpression, createFragment, render). Uses `createAccessor` for component props, `patchAttributes` for element attributes.
+- **`packages/ui/src/framework/attrs.mjs`**: `patchAttributes` / `hydrateAttributes` — iterates attribute object keys, checks each value for `reactiveSymbol`, creates individual effects for reactive attributes.
+- **`packages/ui/src/index.mjs`**: Public exports from the runtime library.
+- **`packages/lang/src/parser.mjs`**: Chevrotain-based parser (CST).
+- **`packages/lang/src/ast-converter.mjs`**: CST → Oddo AST conversion.
+- **`packages/lang/src/index.mjs`**: Public API (`parseOddo`, `compileOddoToJS`, etc.)

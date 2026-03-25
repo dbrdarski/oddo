@@ -874,6 +874,269 @@ test('TL corruption: template literal before JSX with element+expression+text', 
   assert(js.includes('" text"'), '" text" must be preserved');
 });
 
+// --- Composite Reactivity Type ---
+console.log('\n--- Composite Reactivity Type ---');
+
+// Helper: standard @hook preamble for composite tests
+const hookPreamble = `@hook useAuth = () => {
+  @state [email, setEmail] = null
+  @state [token, setToken] = null
+  silentLogin = () => { }
+  return { email, token, silentLogin }
+}`;
+
+// Helper: nested composite hook
+const nestedHookPreamble = `@hook useAuth = () => {
+  @state [name, setName] = null
+  role = "admin"
+  @state [email, setEmail] = null
+  return { user: { name, role }, email }
+}`;
+
+test('Composite: @hook infers composite shape and compiles to function', () => {
+  const js = compileOddoToJS(hookPreamble);
+  assert(js.includes('const useAuth = function'), 'Hook should compile to a function declaration');
+  assert(js.includes('_state(null)'), 'Hook body should contain state calls');
+});
+
+test('Composite: member access as dep in @computed', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@computed summary = data.email`);
+  assert(js.includes('_computed(_data_email => _data_email(), [data.email])'), 'Should collect data.email as dep with flattened param name');
+});
+
+test('Composite: member access as dep in @effect', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@effect () => {\n  console.log(data.email)\n}`);
+  assert(js.includes('_effect(_data_email =>'), 'Effect should have composite dep param');
+  assert(js.includes('console.log(_data_email())'), 'Body should replace data.email with param call');
+  assert(js.includes('[data.email]'), 'Dep array should contain data.email as MemberExpression');
+});
+
+test('Composite: nonreactive member is NOT collected as dep', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@effect () => {\n  data.silentLogin()\n}`);
+  assert(js.includes('_effect(() =>'), 'Effect should have no dep params');
+  assert(js.includes('data.silentLogin()'), 'Nonreactive member should be accessed directly');
+  assert(js.includes(', [])'), 'Dep array should be empty');
+});
+
+test('Composite: member access as dep in liftFn', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\nhandler = (x) => console.log(data.email, x)`);
+  assert(js.includes('_liftFn((_data_email, x) => console.log(_data_email(), x), [data.email])'), 'liftFn should capture composite member as dep');
+});
+
+test('Composite: @state initialized from composite member uses _lift', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@state [localEmail, setLocalEmail] = data.email`);
+  assert(js.includes('_state(_lift(_data_email => _data_email(), [data.email]))'), 'State initializer should wrap composite member with _lift');
+});
+
+test('Composite: spread in @computed uses compositeProxy', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@computed allData = { ...data, extra: 1 }`);
+  assert(/import \{.*compositeProxy as \w+.*\}/.test(js), 'Should import compositeProxy');
+  assert(js.includes('_compositeProxy(data)'), 'Dep array should wrap composite with compositeProxy');
+  assert(js.includes('...data'), 'Spread should remain in the computed body');
+});
+
+test('Composite: destructuring from composite call classifies members correctly', () => {
+  const js = compileOddoToJS(`${hookPreamble}\n{ email, token } = useAuth()\n@computed val = email`);
+  assert(!js.includes('data.email'), 'Should NOT have member expressions — destructured directly');
+  assert(js.includes('_computed(email => email(), [email])'), 'Destructured reactive member should be a regular dep');
+});
+
+test('Composite: destructured nonreactive member is not a dep', () => {
+  const js = compileOddoToJS(`${hookPreamble}\n{ email, silentLogin } = useAuth()\n@effect () => {\n  silentLogin()\n}`);
+  assert(js.includes('_effect(() =>'), 'Effect should have no dep params when only using nonreactive member');
+  assert(js.includes('silentLogin()'), 'Nonreactive destructured member should be plain');
+  assert(js.includes(', [])'), 'Dep array should be empty');
+});
+
+test('Composite: nested composite member access (data.user.name)', () => {
+  const js = compileOddoToJS(`${nestedHookPreamble}\ndata = useAuth()\n@computed summary = data.user.name`);
+  assert(js.includes('_computed(_data_user_name => _data_user_name(), [data.user.name])'), 'Should resolve nested composite path to reactive dep');
+});
+
+test('Composite: nested nonreactive member (data.user.role) is NOT a dep', () => {
+  const js = compileOddoToJS(`${nestedHookPreamble}\ndata = useAuth()\n@effect () => {\n  console.log(data.user.role)\n}`);
+  assert(js.includes('_effect(() =>'), 'Effect should have no dep params for nonreactive nested member');
+  assert(js.includes('data.user.role'), 'Nonreactive nested member should be accessed directly');
+  assert(js.includes(', [])'), 'Dep array should be empty');
+});
+
+test('Composite: nested destructuring from composite call', () => {
+  const js = compileOddoToJS(`${nestedHookPreamble}\n{ user: { name, role }, email } = useAuth()\n@computed val = name`);
+  assert(js.includes('_computed(name => name(), [name])'), 'Nested destructured reactive member should be a regular dep');
+  assert(js.includes('user: {\n    name,\n    role\n  }'), 'Nested destructuring structure should be preserved');
+});
+
+test('Composite: @mutate reading composite member as outer dep', () => {
+  const input = `@hook useAuth = () => {
+  @state [email, setEmail] = null
+  return { email }
+}
+@state [localVal, setLocalVal] = 0
+data = useAuth()
+@mutate updateLocal = () => {
+  localVal := data.email
+}`;
+  const js = compileOddoToJS(input);
+  assert(js.includes('[data.email]'), 'Mutate outer deps should include composite member');
+  assert(js.includes('_data_email'), 'Mutate body should receive composite dep param');
+});
+
+// --- Inline Composite Evaluation (Hoisting) ---
+console.log('\n--- Inline Composite Evaluation (Hoisting) ---');
+
+test('Composite inline eval: hoists call to variable before use', () => {
+  const js = compileOddoToJS(`${hookPreamble}\n@computed val = useAuth().email`);
+  assert(js.includes('const _useAuth = useAuth()'), 'Should hoist inline call to const variable');
+  assert(js.includes('_useAuth.email'), 'Hoisted variable should be used in member access');
+  assert(!js.includes('useAuth().email'), 'Inline call should NOT remain in output');
+});
+
+test('Composite inline eval: deduplication across multiple contexts', () => {
+  const js = compileOddoToJS(`${hookPreamble}\n@computed val1 = useAuth().email\n@computed val2 = useAuth().token`);
+  const hoistCount = (js.match(/const _useAuth = useAuth\(\)/g) || []).length;
+  assert(hoistCount === 1, `Should have exactly 1 hoisted call, got ${hoistCount}`);
+  assert(js.includes('_useAuth.email'), 'First use should reference hoisted var');
+  assert(js.includes('_useAuth.token'), 'Second use should reference same hoisted var');
+});
+
+test('Composite inline eval: hoisted variable not wrapped with _lift', () => {
+  const js = compileOddoToJS(`${hookPreamble}\n@computed val = useAuth().email`);
+  assert(!js.includes('_lift') || !js.includes('_lift(_useAuth'), 'Hoisted declaration should NOT be wrapped with _lift');
+  assert(/const _useAuth = useAuth\(\);/.test(js), 'Hoisted declaration should be plain const');
+});
+
+// --- Multi-Use Composite Member Hoisting ---
+console.log('\n--- Multi-Use Composite Member Hoisting ---');
+
+test('Composite multi-use: hoists member path used in multiple contexts', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@computed summary = data.email\n@effect () => {\n  console.log(data.email)\n}`);
+  assert(js.includes('const _data_email = data.email'), 'Should hoist multi-use composite member to const');
+  assert(js.includes('[_data_email]'), 'Both contexts should reference hoisted variable');
+});
+
+test('Composite multi-use: single-use member is NOT hoisted', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@computed summary = data.email`);
+  assert(!js.includes('const _data_email = data.email'), 'Single-use member should NOT be hoisted');
+  assert(js.includes('[data.email]'), 'Should use direct member access in dep array');
+});
+
+test('Composite multi-use: hoisted var inserted before first use', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@computed summary = data.email\n@effect () => {\n  console.log(data.email)\n}`);
+  const hoistIdx = js.indexOf('const _data_email = data.email');
+  const firstUseIdx = js.indexOf('const summary =');
+  assert(hoistIdx < firstUseIdx, 'Hoisted variable should appear before first use');
+  assert(hoistIdx > js.indexOf('const data = useAuth()'), 'Hoisted variable should appear after composite declaration');
+});
+
+// --- Regression: No Double-Wrapping ---
+console.log('\n--- Composite: No Double-Wrapping ---');
+
+test('Composite: no nested _lift inside @effect body', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@effect () => {\n  console.log(data.email)\n}`);
+  assert(!js.includes('_lift('), 'Effect body should NOT contain _lift — dep is already unwrapped');
+});
+
+test('Composite: no nested _lift inside @computed body', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\n@computed x = data.email + data.token`);
+  assert(!js.includes('_lift('), 'Computed body should NOT contain _lift');
+  assert(js.includes('_computed((_data_email, _data_token) =>'), 'Both composite deps should be params');
+});
+
+// --- Composite with Regular Reactive Deps ---
+console.log('\n--- Composite + Regular Reactive Deps ---');
+
+test('Composite: mixed composite and regular reactive deps in @computed', () => {
+  const js = compileOddoToJS(`@state count = 0\n${hookPreamble}\ndata = useAuth()\n@computed mixed = data.email + count`);
+  assert(js.includes('_computed((count, _data_email) =>'), 'Should have both regular dep and composite dep as params');
+  assert(js.includes('count()'), 'Regular dep should be called');
+  assert(js.includes('_data_email()'), 'Composite dep should be called');
+});
+
+test('Composite: mixed composite and regular reactive deps in @effect', () => {
+  const js = compileOddoToJS(`@state count = 0\n${hookPreamble}\ndata = useAuth()\n@effect () => {\n  console.log(count, data.email)\n}`);
+  assert(js.includes('(count, _data_email) =>'), 'Effect should have both dep params');
+  assert(js.includes('[count, data.email]'), 'Dep array should contain both');
+});
+
+// --- Edge Cases ---
+console.log('\n--- Composite Edge Cases ---');
+
+test('Composite: multiple composite variables in same scope', () => {
+  const input = `@hook useAuth = () => {
+  @state [email, setEmail] = null
+  return { email }
+}
+@hook useTheme = () => {
+  @state [color, setColor] = "blue"
+  return { color }
+}
+auth = useAuth()
+theme = useTheme()
+@computed val = auth.email + theme.color`;
+  const js = compileOddoToJS(input);
+  assert(js.includes('_auth_email'), 'Should have auth.email composite dep');
+  assert(js.includes('_theme_color'), 'Should have theme.color composite dep');
+  assert(js.includes('[auth.email, theme.color]'), 'Dep array should contain both composite members');
+});
+
+test('Composite: composite member access in JSX attribute expression', () => {
+  const js = compileOddoToJS(`${hookPreamble}\ndata = useAuth()\nx := <input value={data.email} />`);
+  assert(js.includes('_computed(_data_email => _data_email(), [data.email])'), 'JSX attribute should use _computed with composite dep');
+});
+
+test('Composite: hook returning all nonreactive members is NOT composite', () => {
+  const input = `@hook usePlain = () => {
+  x = 1
+  y = 2
+  return { x, y }
+}
+data = usePlain()
+@computed val = data.x`;
+  const js = compileOddoToJS(input);
+  assert(!js.includes('_data_x'), 'Nonreactive-only hook should not produce composite deps');
+});
+
+// --- Array Composite Shape ---
+console.log('\n--- Array Composite Shape ---');
+
+const arrayHookPreamble = `@hook useData = () => {
+  @state [count, setCount] = 0
+  label = "items"
+  return [count, label]
+}`;
+
+test('Composite array: destructuring classifies reactive element correctly', () => {
+  const js = compileOddoToJS(`${arrayHookPreamble}\n[count, label] = useData()\n@computed val = count`);
+  assert(js.includes('_computed(count => count(), [count])'), 'Destructured reactive array element should be a dep');
+});
+
+test('Composite array: destructuring classifies nonreactive element correctly', () => {
+  const js = compileOddoToJS(`${arrayHookPreamble}\n[count, label] = useData()\n@effect () => {\n  console.log(label)\n}`);
+  assert(js.includes('_effect(() =>'), 'Effect should have no dep params for nonreactive array element');
+  assert(js.includes('console.log(label)'), 'Nonreactive element should be accessed directly');
+  assert(js.includes(', [])'), 'Dep array should be empty');
+});
+
+test('Composite array: both reactive and nonreactive elements in same expression', () => {
+  const js = compileOddoToJS(`${arrayHookPreamble}\n[count, label] = useData()\n@computed display = count + " " + label`);
+  assert(js.includes('_computed(count =>'), 'Should have reactive element as dep');
+  assert(js.includes('count()'), 'Reactive element should be called');
+  assert(js.includes('label'), 'Nonreactive element should remain plain');
+  assert(!js.includes('label()'), 'Nonreactive element should NOT be called');
+});
+
+test('Composite array: all nonreactive elements is NOT composite', () => {
+  const input = `@hook usePlainArr = () => {
+  x = 1
+  y = 2
+  return [x, y]
+}
+[a, b] = usePlainArr()
+@computed val = a`;
+  const js = compileOddoToJS(input);
+  assert(!js.includes('[a]'), 'All-nonreactive array should not produce reactive deps');
+});
+
 if (testsFailed > 0) {
   console.log('\n=== Failures ===');
   failures.forEach(({ name, error }) => {
