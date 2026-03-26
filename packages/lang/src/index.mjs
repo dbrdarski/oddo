@@ -6,7 +6,7 @@
 import { lexer } from './lexer.mjs';
 import { parser } from './parser.mjs';
 import { convertCSTToAST, convertExpression } from './ast-converter.mjs';
-import { compileToJS } from './compiler.mjs';
+import { compileToJS, extractSignature, extractImportEdges } from './compiler.mjs';
 import { highlightOddo, getHighlightingCSS } from './highlighter.mjs';
 
 /**
@@ -100,6 +100,9 @@ export function compileOddoExpressionToJS(input, config = {}) {
   const ast = parseOddoExpression(input);
   return compileToJS(ast, config);
 }
+
+// Re-export compiler utilities for multi-file builds
+export { extractSignature, extractImportEdges };
 
 // Re-export highlighter functions
 export { highlightOddo, getHighlightingCSS };

@@ -1,0 +1,1 @@
+{"filePath":"/Users/dane/Documents/My Projects/oddo/packages/docs/src/pages/api/codeArrows.oddo","sourceHash":"38a54849b91f83a527baa4acdb483614eed34c6eaef42fb3880cfafc1c00c7ff","signature":{"default":{"type":"immutable","reactive":false,"composite":null}},"compiledJs":"export default `x => x + 1\n(a, b) => a + b\n() => 42\n(x) => { return x * 2 }`;","importEdges":[]}

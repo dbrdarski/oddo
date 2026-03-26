@@ -16,18 +16,12 @@ const SRC_DIR = path.join(__dirname, 'src')
 const PUBLIC_DIR = path.join(__dirname, 'public')
 const DIST_DIR = path.join(__dirname, 'dist')
 const TEMP_DIR = path.join(__dirname, '.temp')
+const CACHE_DIR = path.join(__dirname, '.cache')
 const UI_PACKAGE = path.join(__dirname, '..', 'ui', 'src', 'index.mjs')
 const LANG_PACKAGE = path.join(__dirname, '..', 'lang', 'src', 'index.mjs')
 const ROUTER_PACKAGE = path.join(__dirname, '..', 'router', 'src', 'index.mjs')
 
-// Import compiler
-const langPath = path.join(__dirname, '..', 'lang', 'src', 'index.mjs')
-let compileOddoToJS
-
-async function loadCompiler() {
-  const lang = await import(langPath)
-  compileOddoToJS = lang.compileOddoToJS
-}
+import { createBuildContext } from '../build/src/index.mjs'
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
@@ -55,25 +49,13 @@ function processPublicDir(srcDir, destDir) {
   }
 }
 
-async function compileOddo(srcPath, relativePath) {
+function writeTempJs(filePath, jsCode) {
+  const relativePath = path.relative(SRC_DIR, filePath)
   const tempJsPath = path.join(TEMP_DIR, relativePath.replace('.oddo', '.js'))
-
-  try {
-    // Compile Oddo to JS
-    const source = fs.readFileSync(srcPath, 'utf-8')
-    const jsCode = compileOddoToJS(source, { runtimeLibrary: '@oddo/ui' })
-
-    // Ensure temp subdirectories exist
-    ensureDir(path.dirname(tempJsPath))
-    fs.writeFileSync(tempJsPath, jsCode, 'utf-8')
-
-    console.log(`📝 Compiled: ${relativePath}`)
-    return tempJsPath
-  } catch (err) {
-    console.error(`❌ Compile Error: ${relativePath}`)
-    console.error(`   ${err.message}`)
-    return null
-  }
+  ensureDir(path.dirname(tempJsPath))
+  fs.writeFileSync(tempJsPath, jsCode, 'utf-8')
+  console.log(`📝 Compiled: ${relativePath}`)
+  return tempJsPath
 }
 
 async function bundleJs(tempJsPath, destPath, relativePath) {
@@ -125,22 +107,18 @@ async function build() {
   // Copy public assets
   processPublicDir(PUBLIC_DIR, DIST_DIR)
 
-  // Phase 1: Compile all .oddo files to .js
+  // Phase 1: Compile all .oddo files using the build pipeline (DAG-aware, signature-propagating)
   const entryPoints = []
   if (fs.existsSync(SRC_DIR)) {
     console.log('\nPhase 1: Compiling .oddo files...')
-    for (const entry of fs.readdirSync(SRC_DIR, { withFileTypes: true, recursive: true })) {
-      if (entry.isFile() && entry.name.endsWith('.oddo')) {
-        const fullSrcPath = path.join(entry.path, entry.name)
-        const relativePath = path.relative(SRC_DIR, fullSrcPath)
-        const tempJsPath = await compileOddo(fullSrcPath, relativePath)
-        
-        if (tempJsPath) {
-          // Bundle client.oddo as app.js (the browser entry point)
-          if (relativePath === 'client.oddo') {
-            entryPoints.push({ tempJsPath, relativePath: 'app.oddo' })
-          }
-        }
+    const ctx = createBuildContext({ srcDir: SRC_DIR, cacheDir: CACHE_DIR, runtimeLibrary: '@oddo/ui' })
+    const { results } = await ctx.build()
+
+    for (const [filePath, { js }] of results) {
+      const tempJsPath = writeTempJs(filePath, js)
+      const relativePath = path.relative(SRC_DIR, filePath)
+      if (relativePath === 'client.oddo') {
+        entryPoints.push({ tempJsPath, relativePath: 'app.oddo' })
       }
     }
 
@@ -161,39 +139,36 @@ async function build() {
 }
 
 async function main() {
-  await loadCompiler()
   await build()
 
   if (process.argv.includes('--watch') || process.argv.includes('-w')) {
     console.log('👀 Watching for changes...\n')
 
-    const watchDir = (dir, isPublic) => {
-      if (!fs.existsSync(dir)) return
-      fs.watch(dir, { recursive: true }, async (_, filename) => {
-        if (!filename) return
-        const srcPath = path.join(dir, filename)
-        if (!fs.existsSync(srcPath)) return
+    const ctx = createBuildContext({ srcDir: SRC_DIR, cacheDir: CACHE_DIR, runtimeLibrary: '@oddo/ui' })
+    await ctx.build()
 
-        console.log(`\n📝 Changed: ${filename}`)
-        if (isPublic) {
-          copyFile(srcPath, path.join(DIST_DIR, filename))
-        } else if (filename.endsWith('.oddo')) {
-          const relativePath = path.relative(SRC_DIR, srcPath)
-          const tempJsPath = await compileOddo(srcPath, relativePath)
-          
-          if (tempJsPath) {
-            // Bundle client.oddo as app.js (the browser entry point)
-            if (relativePath === 'client.oddo') {
-              const destPath = path.join(DIST_DIR, 'app.js')
-              await bundleJs(tempJsPath, destPath, 'app.oddo')
-            }
+    const watcher = ctx.createWatcher({
+      onChange: async ({ results }) => {
+        for (const [filePath, { js }] of results) {
+          const tempJsPath = writeTempJs(filePath, js)
+          const relativePath = path.relative(SRC_DIR, filePath)
+          if (relativePath === 'client.oddo') {
+            const destPath = path.join(DIST_DIR, 'app.js')
+            await bundleJs(tempJsPath, destPath, 'app.oddo')
           }
         }
+      }
+    })
+
+    if (fs.existsSync(PUBLIC_DIR)) {
+      fs.watch(PUBLIC_DIR, { recursive: true }, (_, filename) => {
+        if (!filename) return
+        const srcPath = path.join(PUBLIC_DIR, filename)
+        if (!fs.existsSync(srcPath)) return
+        console.log(`\n📝 Changed: ${filename}`)
+        copyFile(srcPath, path.join(DIST_DIR, filename))
       })
     }
-
-    watchDir(SRC_DIR, false)
-    watchDir(PUBLIC_DIR, true)
   }
 }
 

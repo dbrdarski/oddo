@@ -27,15 +27,10 @@ const UI_DOM_PACKAGE = path.join(PACKAGES_DIR, 'ui', 'src', 'index.mjs')
 const ROUTER_SRC = path.join(PACKAGES_DIR, 'router', 'src', 'index.mjs')
 const LANG_PACKAGE = path.join(PACKAGES_DIR, 'lang', 'src', 'index.mjs')
 
-// Import compiler
-const langPath = path.join(PACKAGES_DIR, 'lang', 'src', 'index.mjs')
-let parseOddo, compileOddoToJS
+const CACHE_DIR = path.join(__dirname, '.cache-ssr')
 
-async function loadCompiler() {
-  const lang = await import(langPath)
-  parseOddo = lang.parseOddo
-  compileOddoToJS = lang.compileOddoToJS
-}
+import { parseOddo, compileOddoToJS } from '../lang/src/index.mjs'
+import { createBuildContext } from '../build/src/index.mjs'
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
@@ -50,23 +45,13 @@ function cleanDir(dir) {
   ensureDir(dir)
 }
 
-async function compileOddo(srcPath, relativePath) {
+function writeTempJs(filePath, jsCode) {
+  const relativePath = path.relative(SRC_DIR, filePath)
   const tempJsPath = path.join(TEMP_DIR, relativePath.replace('.oddo', '.js'))
-
-  try {
-    const source = fs.readFileSync(srcPath, 'utf-8')
-    const jsCode = compileOddoToJS(source, { runtimeLibrary: '@oddo/ui' })
-
-    ensureDir(path.dirname(tempJsPath))
-    fs.writeFileSync(tempJsPath, jsCode, 'utf-8')
-
-    console.log(`📝 Compiled: ${relativePath}`)
-    return tempJsPath
-  } catch (err) {
-    console.error(`❌ Compile Error: ${relativePath}`)
-    console.error(`   ${err.message}`)
-    return null
-  }
+  ensureDir(path.dirname(tempJsPath))
+  fs.writeFileSync(tempJsPath, jsCode, 'utf-8')
+  console.log(`📝 Compiled: ${relativePath}`)
+  return tempJsPath
 }
 
 async function buildSSR() {
@@ -75,19 +60,18 @@ async function buildSSR() {
   cleanDir(DIST_SSR_DIR)
   cleanDir(TEMP_DIR)
 
-  // Phase 1: Compile all .oddo files to .js
+  // Phase 1: Compile all .oddo files using the build pipeline (DAG-aware)
   console.log('Phase 1: Compiling .oddo files...')
 
   if (!fs.existsSync(SRC_DIR)) {
     throw new Error('src directory not found')
   }
 
-  for (const entry of fs.readdirSync(SRC_DIR, { withFileTypes: true, recursive: true })) {
-    if (entry.isFile() && entry.name.endsWith('.oddo')) {
-      const fullSrcPath = path.join(entry.path, entry.name)
-      const relativePath = path.relative(SRC_DIR, fullSrcPath)
-      await compileOddo(fullSrcPath, relativePath)
-    }
+  const ctx = createBuildContext({ srcDir: SRC_DIR, cacheDir: CACHE_DIR, runtimeLibrary: '@oddo/ui' })
+  const { results } = await ctx.build()
+
+  for (const [filePath, { js }] of results) {
+    writeTempJs(filePath, js)
   }
 
   // Phase 2: Bundle server.js with SSR aliases
@@ -226,8 +210,6 @@ function serveFile(res, filePath) {
 }
 
 async function start() {
-  await loadCompiler()
-
   // Build the SSR bundle
   const bundlePath = await buildSSR()
 

@@ -1,0 +1,1 @@
+{"filePath":"/Users/dane/Documents/My Projects/oddo/packages/docs/src/pages/api/codeElements.oddo","sourceHash":"266ba8b0351a42f8c8261b6ecb2d921c247cd1225ad0c6ee019723549c22bbab","signature":{"default":{"type":"immutable","reactive":false,"composite":null}},"compiledJs":"export default `<div>Hello</div>\n<Button />\n<MyComponent prop=\"value\" />`;","importEdges":[]}

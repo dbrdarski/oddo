@@ -1,0 +1,1 @@
+{"filePath":"/Users/dane/Documents/My Projects/oddo/packages/docs/src/client.oddo","sourceHash":"4b8ad893b4053c47cd4561375fc29f2ea17120ace49e500b906dca9ec7921d61","signature":{},"compiledJs":"import { c as _c } from \"@oddo/ui\";\nimport { hydrate, mount } from \"@oddo/ui\";\nimport App from \"./app\";\nhydrate(document.getElementById(\"app\"), _c(App, null));","importEdges":[]}

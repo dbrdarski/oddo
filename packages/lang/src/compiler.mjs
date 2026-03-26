@@ -1110,6 +1110,7 @@ let mutableVariables = new Set();
 // Child scopes inherit from parent scopes via Object.create()
 let moduleScope = null;
 let currentScope = null;
+let importSignaturesMap = null;
 
 // Symbol to track whether current scope is "reactive" (functions could receive reactive values)
 // Root scope is reactive; scopes inside dependency-tracking contexts are non-reactive
@@ -1758,17 +1759,42 @@ function collectOddoIdentifiers(node, names = new Set()) {
   if (node.type === 'importStatement') {
     const source = node.source || '';
     const isOddoImport = source.endsWith('.oddo');
-    const type = isOddoImport ? 'import-oddo' : 'import-js';
-    
-    // Default import: import Btn from "..."
-    if (node.defaultImport) {
-      declareVariable(node.defaultImport, type);
-    }
-    // Named imports: import { x, y } from "..."
-    for (const spec of node.specifiers || []) {
-      const localName = spec.local || spec.imported;
-      if (localName) {
-        declareVariable(localName, type);
+    const sig = isOddoImport && importSignaturesMap ? importSignaturesMap[source] : null;
+
+    if (sig) {
+      if (node.defaultImport) {
+        const info = sig.default;
+        if (info?.composite) {
+          declareComposite(node.defaultImport, info.type || 'import-oddo', info.composite);
+        } else if (info) {
+          declareVariable(node.defaultImport, info.type || 'import-oddo', info.composite || null);
+        } else {
+          declareVariable(node.defaultImport, 'import-oddo');
+        }
+      }
+      for (const spec of node.specifiers || []) {
+        const localName = spec.local || spec.imported;
+        const importedName = spec.imported;
+        if (!localName) continue;
+        const info = sig[importedName];
+        if (info?.composite) {
+          declareComposite(localName, info.type || 'import-oddo', info.composite);
+        } else if (info) {
+          declareVariable(localName, info.type || 'import-oddo', info.composite || null);
+        } else {
+          declareVariable(localName, 'import-oddo');
+        }
+      }
+    } else {
+      const type = isOddoImport ? 'import-oddo' : 'import-js';
+      if (node.defaultImport) {
+        declareVariable(node.defaultImport, type);
+      }
+      for (const spec of node.specifiers || []) {
+        const localName = spec.local || spec.imported;
+        if (localName) {
+          declareVariable(localName, type);
+        }
       }
     }
   }
@@ -1859,6 +1885,7 @@ export function compileToJS(ast, config = {}) {
   mutableVariables = new Set();
   moduleScope = null;
   currentScope = null;
+  importSignaturesMap = config.importSignatures || null;
   
   // Pre-pass: collect all identifiers and build scope chain with variable types
   usedNames = collectOddoIdentifiers(ast);
@@ -3223,4 +3250,79 @@ function convertImportNamespaceStatement(stmt) {
   const namespace = t.importNamespaceSpecifier(t.identifier(stmt.namespace));
   const source = t.stringLiteral(stmt.source);
   return t.importDeclaration([namespace], source);
+}
+
+/**
+ * Extract the export signature from an Oddo AST.
+ * Runs the pre-pass to build the scope chain, then walks export statements
+ * to map each exported name to its scope entry { type, reactive, composite }.
+ * @param {object} ast - Oddo program AST
+ * @param {object} config - { importSignatures?: { [source]: signature } }
+ * @returns {object} signature - { [exportedName]: { type, reactive, composite }, default?: ... }
+ */
+export function extractSignature(ast, config = {}) {
+  if (!ast || ast.type !== 'program') {
+    throw new Error('Expected a program AST node');
+  }
+
+  usedModifiers = new Set();
+  modifierAliases = {};
+  stateSetterMap = new Map();
+  mutableVariables = new Set();
+  moduleScope = null;
+  currentScope = null;
+  importSignaturesMap = config.importSignatures || null;
+  usedNames = collectOddoIdentifiers(ast);
+
+  const signature = {};
+
+  for (const stmt of ast.body) {
+    if (stmt.type === 'exportNamedStatement') {
+      if (stmt.declaration?.type === 'expressionStatement' && stmt.declaration.expression) {
+        const expr = stmt.declaration.expression;
+        const name = expr.left?.name;
+        if (name && Object.prototype.hasOwnProperty.call(moduleScope, name)) {
+          const info = moduleScope[name];
+          signature[name] = { type: info.type, reactive: info.reactive, composite: info.composite || null };
+        }
+      }
+      for (const spec of stmt.specifiers || []) {
+        const localName = spec.local;
+        const exportedName = spec.exported || spec.local;
+        if (localName && Object.prototype.hasOwnProperty.call(moduleScope, localName)) {
+          const info = moduleScope[localName];
+          signature[exportedName] = { type: info.type, reactive: info.reactive, composite: info.composite || null };
+        }
+      }
+    }
+
+    if (stmt.type === 'exportDefaultStatement') {
+      const decl = stmt.declaration;
+      if (decl?.type === 'identifier' && Object.prototype.hasOwnProperty.call(moduleScope, decl.name)) {
+        const info = moduleScope[decl.name];
+        signature.default = { type: info.type, reactive: info.reactive, composite: info.composite || null };
+      } else {
+        signature.default = { type: 'immutable', reactive: false, composite: null };
+      }
+    }
+  }
+
+  return signature;
+}
+
+/**
+ * Extract .oddo import source paths from an Oddo AST.
+ * Walks top-level statements and returns source strings for .oddo imports.
+ * @param {object} ast - Oddo program AST
+ * @returns {string[]} Array of import source strings ending in .oddo
+ */
+export function extractImportEdges(ast) {
+  if (!ast || ast.type !== 'program') return [];
+  const edges = [];
+  for (const stmt of ast.body) {
+    if (stmt.type === 'importStatement' && stmt.source?.endsWith('.oddo')) {
+      edges.push(stmt.source);
+    }
+  }
+  return edges;
 }
