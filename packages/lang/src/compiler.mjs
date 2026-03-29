@@ -1063,7 +1063,7 @@ const MODIFIER_TRANSFORMATIONS = {
         throw new Error('@component modifier must be applied to an arrow function');
       }
 
-      const funcExpr = convertReactiveContainer(oddoExpr);
+      const funcExpr = convertReactiveContainer(oddoExpr, true);
 
       if (leftExpr && t.isIdentifier(leftExpr)) {
         return t.variableDeclaration('const', [
@@ -1115,6 +1115,7 @@ let importSignaturesMap = null;
 // Symbol to track whether current scope is "reactive" (functions could receive reactive values)
 // Root scope is reactive; scopes inside dependency-tracking contexts are non-reactive
 const reactiveScope = Symbol("reactive-scope");
+const componentScope = Symbol("component-scope");
 
 // Variable info structure: { type, reactive: boolean, composite: CompositeShape | null }
 // CompositeShape: { kind: 'object', members: { [key]: MemberInfo } }
@@ -2135,10 +2136,10 @@ function convertExpressionStatement(stmt) {
     
     let finalExpr;
     if (oddoRight.type !== 'arrowFunction') {
-      const identifiers = collectOddoIdentifiersOnly(oddoRight);
+      const identifiers = collectOddoIdentifiersOnly(oddoRight, new Set(), true);
       const reactiveDeps = getReactiveDeps(identifiers);
-      const compositeDeps = collectCompositeDeps(oddoRight);
-      const compositeSpreads = collectCompositeSpreads(oddoRight);
+      const compositeDeps = collectCompositeDeps(oddoRight, [], new Set(), true);
+      const compositeSpreads = collectCompositeSpreads(oddoRight, [], new Set(), true);
       const hasAnyDeps = reactiveDeps.length > 0 || compositeDeps.length > 0 || compositeSpreads.length > 0;
       
       const savedScope = currentScope;
@@ -2174,10 +2175,10 @@ function convertExpressionStatement(stmt) {
                         stmt.expression.type !== 'arraySliceAssignment';
     
     if (isPlainExpr) {
-      const allIdentifiers = collectOddoIdentifiersOnly(stmt.expression, new Set(), false, true);
+      const allIdentifiers = collectOddoIdentifiersOnly(stmt.expression, new Set(), true, true);
       const reactiveDeps = allIdentifiers.filter(id => isReactive(id));
-      const compositeDeps = collectCompositeDeps(stmt.expression, [], new Set(), false, true);
-      const compositeSpreads = collectCompositeSpreads(stmt.expression, [], new Set(), false, true);
+      const compositeDeps = collectCompositeDeps(stmt.expression, [], new Set(), true, true);
+      const compositeSpreads = collectCompositeSpreads(stmt.expression, [], new Set(), true, true);
       const hasAnyDeps = reactiveDeps.length > 0 || compositeDeps.length > 0 || compositeSpreads.length > 0;
       
       if (hasAnyDeps) {
@@ -2272,8 +2273,18 @@ function convertExpressionStatement(stmt) {
  * Convert Oddo return statement to Babel return statement
  */
 function convertReturnStatement(stmt) {
-  const argument = stmt.argument ? convertExpression(stmt.argument) : null;
-  return t.returnStatement(argument);
+  if (!stmt.argument) return t.returnStatement(null);
+
+  if (currentScope[componentScope]) {
+    const savedScope = currentScope;
+    currentScope = Object.create(currentScope);
+    currentScope[reactiveScope] = false;
+    const argument = convertExpression(stmt.argument);
+    currentScope = savedScope;
+    return t.returnStatement(createReactiveExpr(stmt.argument, argument));
+  }
+
+  return t.returnStatement(convertExpression(stmt.argument));
 }
 
 /**
@@ -2547,7 +2558,7 @@ function convertArrowFunction(expr) {
  * - Parameters are treated as reactive inside the body
  * - Body reactivity works normally (@state, @computed, etc.)
  */
-function convertReactiveContainer(expr) {
+function convertReactiveContainer(expr, isComponent = false) {
   // Switch to this function's scope (created during pre-pass)
   const savedScope = currentScope;
   if (expr._scope) {
@@ -2555,6 +2566,10 @@ function convertReactiveContainer(expr) {
   } else {
     // Create a new scope for this container
     currentScope = Object.create(savedScope);
+  }
+
+  if (isComponent) {
+    currentScope[componentScope] = true;
   }
   
   // Mark all parameters as reactive in scope
