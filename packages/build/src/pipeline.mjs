@@ -16,6 +16,7 @@ import { computeHash } from './cache.mjs';
  */
 export function runPipeline(diff, state, config) {
   const { runtimeLibrary = '@oddo/ui' } = config;
+  const warnings = [];
 
   // Step 1: Remove deleted files
   for (const filePath of diff.deleted) {
@@ -91,7 +92,7 @@ export function runPipeline(diff, state, config) {
     }
 
     // Build importSignatures map for this file
-    const importSigs = buildImportSignatures(filePath, state);
+    const importSigs = buildImportSignatures(filePath, state, warnings);
 
     // Extract signature (stage 5 only) to check for cascade
     const ast = state.asts.get(filePath);
@@ -131,14 +132,14 @@ export function runPipeline(diff, state, config) {
     }
   }
 
-  return { affected: compiledResults, allFiles, importEdgesMap: allImportEdges };
+  return { affected: compiledResults, allFiles, importEdgesMap: allImportEdges, warnings };
 }
 
 /**
  * Build the importSignatures config for a given file based on current state.
  * Maps each .oddo import source to its signature in the state.
  */
-function buildImportSignatures(filePath, state) {
+function buildImportSignatures(filePath, state, warnings) {
   const sigs = {};
   const ast = state.asts.get(filePath);
   if (!ast) return sigs;
@@ -149,6 +150,8 @@ function buildImportSignatures(filePath, state) {
       const sig = state.signatures.get(resolvedPath);
       if (sig) {
         sigs[stmt.source] = sig;
+      } else {
+        warnings.push(`${filePath}: import "${stmt.source}" resolves to "${resolvedPath}" which is not part of the build`);
       }
     }
   }

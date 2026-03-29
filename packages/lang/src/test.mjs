@@ -1137,6 +1137,53 @@ test('Composite array: all nonreactive elements is NOT composite', () => {
   assert(!js.includes('[a]'), 'All-nonreactive array should not produce reactive deps');
 });
 
+// --- JSX Dep Collection: No Stealing ---
+console.log('\n--- JSX Dep Collection: No Stealing ---');
+
+test('JSX: sibling expressions each get own _x, not merged', () => {
+  const js = compileOddoToJS(`@state a = 1\n@state b = 2\nx := <div>{a} {b}</div>`);
+  const xCount = (js.match(/_x\(/g) || []).length;
+  assert(xCount === 2, `Should have exactly 2 _x calls (one per expression), got ${xCount}`);
+});
+
+test('JSX: nested JSX element does not steal child deps', () => {
+  const js = compileOddoToJS(`@state a = 1\n@state b = 2\nx := <div>{a + <span>{b}</span>}</div>`);
+  assert(js.includes('_x('), 'Should have _x wrapping');
+  const outerXMatch = js.match(/_x\(([^)]+)\)/);
+  assert(!js.includes('_x(_a, _b'), 'Outer _x should NOT have both a and b as deps');
+});
+
+test('JSX: variable assigned JSX should NOT get _lift wrapper', () => {
+  const js = compileOddoToJS(`@state x = 1\ntemp = <p>{x}</p>`);
+  assert(!js.includes('_lift('), 'Variable assigned JSX should NOT be wrapped with _lift');
+  assert(js.includes('_x('), 'JSX expression {x} should still get _x wrapping');
+});
+
+test('JSX: plain expression statement with JSX should NOT get _lift', () => {
+  const js = compileOddoToJS(`@state x = 1\nsomeFunc(<p>{x}</p>)`);
+  assert(!js.includes('_lift('), 'Expression with JSX arg should NOT be wrapped with _lift');
+});
+
+// --- Component Return Reactivity ---
+console.log('\n--- Component Return Reactivity ---');
+
+test('Component: return with reactive deps gets _x wrapping', () => {
+  const js = compileOddoToJS(`@component Foo = () => {\n  @state x = 1\n  return x + 1\n}`);
+  assert(js.includes('_x('), 'Component return with reactive dep should be wrapped with _x');
+});
+
+test('Component: return JSX is NOT double-wrapped', () => {
+  const js = compileOddoToJS(`@component Foo = () => {\n  @state x = 1\n  return <p>{x}</p>\n}`);
+  assert(!js.includes('_lift('), 'Component return of JSX should NOT have _lift');
+  assert(js.includes('_x('), 'Inner JSX expression should still have _x');
+});
+
+test('Hook: return with reactive members is NOT wrapped', () => {
+  const js = compileOddoToJS(`@hook bar = (x) => {\n  @computed x1 = x + 1\n  return { x, x1 }\n}`);
+  assert(!js.includes('_x('), 'Hook return should NOT be wrapped with _x');
+  assert(!js.includes('_lift('), 'Hook return should NOT be wrapped with _lift');
+});
+
 if (testsFailed > 0) {
   console.log('\n=== Failures ===');
   failures.forEach(({ name, error }) => {

@@ -54,10 +54,14 @@ export function createBuildContext(options) {
       }
     }
 
+    for (const w of pipelineResult.warnings) {
+      console.warn(`[oddo-build] WARNING: ${w}`);
+    }
+
     // Clear ASTs to free memory after build completes
     state.asts.clear();
 
-    return { results, affected: pipelineResult.affected };
+    return { results, affected: pipelineResult.affected, warnings: pipelineResult.warnings };
   }
 
   /**
@@ -80,6 +84,10 @@ export function createBuildContext(options) {
     const results = new Map();
     for (const [filePath, info] of pipelineResult.affected) {
       results.set(filePath, { filePath, js: info.js });
+    }
+
+    for (const w of pipelineResult.warnings) {
+      console.warn(`[oddo-build] WARNING: ${w}`);
     }
 
     state.asts.clear();

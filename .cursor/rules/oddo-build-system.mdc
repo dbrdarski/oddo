@@ -1,0 +1,113 @@
+---
+description: Oddo build system — DAG-based multi-file compilation, signature propagation, caching, and incremental rebuilds
+globs: packages/build/src/**,packages/lang/src/compiler.mjs,packages/docs/build.mjs,packages/docs/server-ssr.mjs
+alwaysApply: false
+---
+
+# Oddo Build System (`@oddo/build`)
+
+## Purpose
+
+The build system replaces blind "treat all .oddo imports as reactive" with **signature-aware compilation**. Each `.oddo` file's exports are analyzed for their exact reactivity type (`state`, `computed`, `immutable`, `composite`), and that information is propagated to downstream files via a DAG.
+
+## Architecture
+
+### Package Structure
+
+- **`packages/lang`** — single-file compiler. Unchanged public API (`compileOddoToJS`, `parseOddo`), plus two new exports: `extractSignature`, `extractImportEdges`.
+- **`packages/build`** — multi-file build orchestration. Depends on `@oddo/lang`. Never touches the compiler internals.
+
+### Key Data Structures
+
+**Signature** — per-file export metadata:
+```
+{ [exportedName]: { type: string, reactive: boolean, composite: CompositeShape|null } }
+```
+Types: `state`, `computed`, `mutable`, `immutable`, `hook`, `component`, `import-oddo`, `import-js`.
+
+**DAG** — directed acyclic graph. Edges: dependent → dependency (A imports B = edge A→B).
+- `dependencies: Map<filePath, Set<depPaths>>` (outbound)
+- `dependents: Map<filePath, Set<dependentPaths>>` (inbound, reverse index)
+
+**BuildState** — sole in-memory source of truth during a build:
+- `dag: DAG`
+- `signatures: Map<filePath, signature>`
+- `sourceHashes: Map<filePath, sha256Hex>`
+- `asts: Map<filePath, oddoAst>` — transient, cleared after each build run, NOT persisted
+
+### Pipeline Flow
+
+`runPipeline(diff, state, config)` processes `{ new[], deleted[], updated[] }`:
+
+1. Remove deleted files from state
+2. Parse new + updated files (stages 1-4), extract import edges, compute source hashes
+3. Update DAG edges (`addFile` for new, `updateFile` for updated)
+4. Cycle check — throws `Error` on circular `.oddo` imports
+5. Determine affected set = changed files ∪ transitive downstream dependents
+6. Compile affected files in **topological order** (dependencies first):
+   - Build `importSignatures` by walking the file's AST for `.oddo` imports, resolving paths, looking up dependency signatures from `state.signatures`
+   - If a dependency's signature is missing (file outside srcDir or typo), emit a warning
+   - Extract new signature; compare with old; if changed, cascade to downstream
+   - Full compile with `compileOddoToJS(source, { importSignatures })`
+7. Return `{ affected, allFiles, importEdgesMap, warnings }`
+
+### Import Classification
+
+In `collectOddoIdentifiers` (compiler pre-pass), when `importSignaturesMap` is set:
+- Look up the signature for the import source
+- For each imported name, read its `{ type, reactive, composite }` from the signature
+- If `composite` is present, call `declareComposite()` (full shape awareness)
+- If no signature exists for the source, fall back to blind `import-oddo` (backward compat)
+
+### Caching
+
+Disk cache (`cacheDir`) persists between process restarts:
+- `_dag.json` — serialized DAG
+- Per-file JSON entries: `{ filePath, sourceHash, signature, compiledJs, importEdges }`
+- On startup: `loadCache()` → `state.initFromCache()` → `scanAndDiff()` produces diff
+- After pipeline: `persistState()` writes updated entries, preserving `compiledJs` for unchanged files
+- `loadCachedJs()` retrieves compiled JS for files not recompiled in this run
+
+### File Watcher
+
+`createWatcher({ onChange, debounceMs })`:
+- Events **debounced** over configurable window (default 150ms)
+- Pipeline runs **serialized** (never concurrent) via a `running` flag
+- Classifies events as new/deleted/updated based on `state.sourceHashes`
+
+## Key Functions
+
+### `packages/lang/src/compiler.mjs`
+
+- `extractSignature(ast, config?)` — runs pre-pass, walks exports, returns signature object
+- `extractImportEdges(ast)` — returns `string[]` of `.oddo` import source paths
+- `compileToJS(ast, config?)` — accepts `config.importSignatures` for signature-aware compilation
+
+### `packages/build/src/`
+
+- `createBuildContext({ srcDir, cacheDir?, runtimeLibrary? })` → `{ build, update, createWatcher, state }`
+- `build()` — full scan+diff+pipeline+persist, returns `{ results, affected, warnings }`
+- `update(diff)` — incremental pipeline for explicit diffs
+- `DAG` class: `addFile`, `removeFile`, `updateFile`, `getDownstream`, `topologicalOrder`, `hasCycle`, `serialize/deserialize`
+
+## Integration Pattern
+
+```javascript
+import { createBuildContext } from '@oddo/build';
+
+const ctx = createBuildContext({ srcDir: './src', cacheDir: '.cache' });
+const { results } = await ctx.build();
+
+for (const [filePath, { js }] of results) {
+  writeFile(filePath.replace('.oddo', '.js'), js);
+}
+```
+
+## Invariants
+
+1. Topological order guarantees a dependency's signature exists before any dependent is compiled
+2. Circular `.oddo` imports are a compile error (strict DAG)
+3. Signature cascade: if file A's signature changes, all transitive dependents are recompiled
+4. ASTs are in-memory only — never persisted to disk cache
+5. `compiledJs` is NOT in BuildState — pipeline returns it, consumer writes to disk
+6. Without `importSignatures` (standalone compiler use), behavior is identical to pre-build-system
